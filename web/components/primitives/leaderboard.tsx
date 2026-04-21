@@ -54,6 +54,7 @@ export function Leaderboard({
   viewAllHref,
   className,
   extraHeader,
+  forceBeaconColumn,
 }: {
   title: string;
   subtitle?: string;
@@ -68,10 +69,23 @@ export function Leaderboard({
   viewAllHref?: string;
   className?: string;
   extraHeader?: React.ReactNode;
+  forceBeaconColumn?: boolean; // G3: keep beacon_coverage visible even when all-zero
 }) {
   const maxShare =
     rows.reduce((m, r) => Math.max(m, r.share ?? 0), 0) || 100;
   const visible = maxRows ? rows.slice(0, maxRows) : rows;
+
+  // G3: auto-hide beacon_coverage when every visible row reports 0 (or null).
+  // Keeps the architecture — caller passes `forceBeaconColumn` on surfaces
+  // where coverage is itself the primary signal (Market detail).
+  const hasBeaconSignal = visible.some(
+    (r) => r.beaconCoveragePct != null && r.beaconCoveragePct > 0,
+  );
+  const effectiveColumns = columns.filter((c) =>
+    c === "beacon_coverage" && !forceBeaconColumn && !hasBeaconSignal
+      ? false
+      : true,
+  );
 
   return (
     <div
@@ -104,42 +118,42 @@ export function Leaderboard({
         </div>
       </div>
 
-      {/* Table */}
+      {/* Table — G1: tight row height (py-1) so 10-12 rows fit a viewport */}
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="border-b border-tb-border text-[10px] font-semibold uppercase tracking-wide text-tb-muted">
             <tr>
-              {columns.includes("rank") && (
-                <th className="w-8 px-3 py-1.5 text-left">#</th>
+              {effectiveColumns.includes("rank") && (
+                <th className="w-8 px-3 py-1 text-left">#</th>
               )}
-              {columns.includes("name") && (
-                <th className="px-3 py-1.5 text-left">Entity</th>
+              {effectiveColumns.includes("name") && (
+                <th className="px-3 py-1 text-left">Entity</th>
               )}
-              {columns.includes("value") && (
-                <th className="px-3 py-1.5 text-right">
+              {effectiveColumns.includes("value") && (
+                <th className="px-3 py-1 text-right">
                   {valueLabel ?? "Value"}
                 </th>
               )}
-              {columns.includes("share") && (
-                <th className="w-[100px] px-3 py-1.5 text-left">Share</th>
+              {effectiveColumns.includes("share") && (
+                <th className="w-[100px] px-3 py-1 text-left">Share</th>
               )}
-              {columns.includes("yoy") && (
-                <th className="w-[80px] px-3 py-1.5 text-right">YoY</th>
+              {effectiveColumns.includes("yoy") && (
+                <th className="w-[80px] px-3 py-1 text-right">YoY</th>
               )}
-              {columns.includes("qoq") && (
-                <th className="w-[80px] px-3 py-1.5 text-right">QoQ</th>
+              {effectiveColumns.includes("qoq") && (
+                <th className="w-[80px] px-3 py-1 text-right">QoQ</th>
               )}
-              {columns.includes("sparkline") && (
-                <th className="w-[80px] px-3 py-1.5 text-left">Trend</th>
+              {effectiveColumns.includes("sparkline") && (
+                <th className="w-[76px] px-3 py-1 text-left">Trend</th>
               )}
-              {columns.includes("ticker") && (
-                <th className="w-[70px] px-3 py-1.5 text-right">Ticker</th>
+              {effectiveColumns.includes("ticker") && (
+                <th className="w-[70px] px-3 py-1 text-right">Ticker</th>
               )}
-              {columns.includes("beacon_coverage") && (
-                <th className="w-[60px] px-3 py-1.5 text-right">Beacon™</th>
+              {effectiveColumns.includes("beacon_coverage") && (
+                <th className="w-[60px] px-3 py-1 text-right">Beacon™</th>
               )}
-              {columns.includes("extra") && (
-                <th className="px-3 py-1.5 text-right" />
+              {effectiveColumns.includes("extra") && (
+                <th className="px-3 py-1 text-right" />
               )}
             </tr>
           </thead>
@@ -147,8 +161,8 @@ export function Leaderboard({
             {visible.length === 0 && (
               <tr>
                 <td
-                  colSpan={columns.length}
-                  className="px-3 py-8 text-center text-[11px] text-tb-muted"
+                  colSpan={effectiveColumns.length}
+                  className="px-3 py-6 text-center text-[11px] text-tb-muted"
                 >
                   No data.
                 </td>
@@ -159,18 +173,16 @@ export function Leaderboard({
                 key={row.id}
                 className="group transition-colors hover:bg-tb-border/25"
               >
-                {columns.includes("rank") && (
-                  <td className="px-3 py-1.5 font-mono text-[11px] text-tb-muted">
+                {effectiveColumns.includes("rank") && (
+                  <td className="px-3 py-1 font-mono text-[11px] text-tb-muted">
                     {i + 1}
                   </td>
                 )}
-                {columns.includes("name") && (
-                  <td className="max-w-[260px] px-3 py-1.5">
+                {effectiveColumns.includes("name") && (
+                  <td className="max-w-[260px] px-3 py-1">
                     <div className="flex items-center gap-2">
                       {row.typeChip && (
-                        <Badge variant="muted" className="shrink-0">
-                          {row.typeChip}
-                        </Badge>
+                        <EntityTypeChip code={row.typeChip} />
                       )}
                       {row.href ? (
                         <Link
@@ -185,9 +197,9 @@ export function Leaderboard({
                     </div>
                   </td>
                 )}
-                {columns.includes("value") && (
+                {effectiveColumns.includes("value") && (
                   <td
-                    className="whitespace-nowrap px-3 py-1.5 text-right font-mono text-tb-text"
+                    className="whitespace-nowrap px-3 py-1 text-right font-mono text-tb-text"
                     title={row.nativeTooltip ?? undefined}
                   >
                     {row.valueFormatted}
@@ -197,8 +209,8 @@ export function Leaderboard({
                     )}
                   </td>
                 )}
-                {columns.includes("share") && (
-                  <td className="px-3 py-1.5">
+                {effectiveColumns.includes("share") && (
+                  <td className="px-3 py-1">
                     {row.share != null ? (
                       <div className="flex items-center gap-1.5">
                         <div
@@ -216,32 +228,35 @@ export function Leaderboard({
                     )}
                   </td>
                 )}
-                {columns.includes("yoy") && (
-                  <td className="px-3 py-1.5 text-right">
+                {effectiveColumns.includes("yoy") && (
+                  <td className="px-3 py-1 text-right">
                     <DeltaChip pct={row.yoy} />
                   </td>
                 )}
-                {columns.includes("qoq") && (
-                  <td className="px-3 py-1.5 text-right">
+                {effectiveColumns.includes("qoq") && (
+                  <td className="px-3 py-1 text-right">
                     <DeltaChip pct={row.qoq} />
                   </td>
                 )}
-                {columns.includes("sparkline") && (
-                  <td className="px-3 py-1.5">
-                    {row.sparkline && row.sparkline.length >= 2 ? (
+                {effectiveColumns.includes("sparkline") && (
+                  <td className="px-3 py-1">
+                    {/* G2: require ≥3 real points (brief rule) before drawing */}
+                    {row.sparkline &&
+                    row.sparkline.filter((v) => v != null && Number.isFinite(v))
+                      .length >= 3 ? (
                       <Sparkline
                         values={row.sparkline}
                         beaconMask={row.beaconMask}
-                        width={64}
-                        height={16}
+                        width={60}
+                        height={20}
                       />
                     ) : (
                       <span className="font-mono text-[10px] text-tb-muted">—</span>
                     )}
                   </td>
                 )}
-                {columns.includes("ticker") && (
-                  <td className="whitespace-nowrap px-3 py-1.5 text-right">
+                {effectiveColumns.includes("ticker") && (
+                  <td className="whitespace-nowrap px-3 py-1 text-right">
                     {row.ticker ? (
                       <span className="inline-flex items-center gap-1 font-mono text-[10px]">
                         <span className="text-tb-text">{row.ticker}</span>
@@ -254,14 +269,16 @@ export function Leaderboard({
                     )}
                   </td>
                 )}
-                {columns.includes("beacon_coverage") && (
-                  <td className="px-3 py-1.5 text-right font-mono text-[10px]">
+                {effectiveColumns.includes("beacon_coverage") && (
+                  <td className="px-3 py-1 text-right font-mono text-[10px]">
                     {row.beaconCoveragePct != null ? (
                       <span
                         className={
                           row.beaconCoveragePct > 50
                             ? "text-tb-beacon"
-                            : "text-tb-muted"
+                            : row.beaconCoveragePct > 0
+                            ? "text-tb-muted"
+                            : "text-tb-muted/60"
                         }
                       >
                         {row.beaconCoveragePct.toFixed(0)}%
@@ -271,8 +288,8 @@ export function Leaderboard({
                     )}
                   </td>
                 )}
-                {columns.includes("extra") && (
-                  <td className="px-3 py-1.5 text-right text-[10px] text-tb-muted">
+                {effectiveColumns.includes("extra") && (
+                  <td className="px-3 py-1 text-right text-[10px] text-tb-muted">
                     {row.extra ?? null}
                   </td>
                 )}
@@ -282,29 +299,29 @@ export function Leaderboard({
               <tr className="border-t-2 border-tb-border bg-tb-bg/40">
                 <td
                   colSpan={
-                    (columns.includes("rank") ? 1 : 0) +
-                    (columns.includes("name") ? 1 : 0)
+                    (effectiveColumns.includes("rank") ? 1 : 0) +
+                    (effectiveColumns.includes("name") ? 1 : 0)
                   }
-                  className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-tb-muted"
+                  className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-tb-muted"
                 >
                   Total
                 </td>
-                {columns.includes("value") && (
-                  <td className="px-3 py-1.5 text-right font-mono font-semibold text-tb-text">
+                {effectiveColumns.includes("value") && (
+                  <td className="px-3 py-1 text-right font-mono font-semibold text-tb-text">
                     {total.valueFormatted}
                   </td>
                 )}
-                {columns.includes("share") && (
-                  <td className="px-3 py-1.5 font-mono text-[10px] text-tb-muted">
+                {effectiveColumns.includes("share") && (
+                  <td className="px-3 py-1 font-mono text-[10px] text-tb-muted">
                     100.0%
                   </td>
                 )}
-                {columns.includes("yoy") && (
-                  <td className="px-3 py-1.5 text-right">
+                {effectiveColumns.includes("yoy") && (
+                  <td className="px-3 py-1 text-right">
                     <DeltaChip pct={total.yoy} />
                   </td>
                 )}
-                {columns
+                {effectiveColumns
                   .filter(
                     (c) =>
                       c !== "rank" &&
@@ -314,7 +331,7 @@ export function Leaderboard({
                       c !== "yoy",
                   )
                   .map((c) => (
-                    <td key={c} className="px-3 py-1.5" />
+                    <td key={c} className="px-3 py-1" />
                   ))}
               </tr>
             )}
@@ -324,7 +341,7 @@ export function Leaderboard({
 
       {/* Footer */}
       {showViewAll && viewAllHref && (
-        <div className="border-t border-tb-border px-3 py-1.5 text-right">
+        <div className="border-t border-tb-border px-3 py-1 text-right">
           <Link
             href={viewAllHref}
             className="text-[10px] text-tb-blue hover:underline"
@@ -335,4 +352,39 @@ export function Leaderboard({
       )}
     </div>
   );
+}
+
+// C2: entity-type chip with subtle background tone per type. Shared across
+// every leaderboard so scanability is uniform.
+function EntityTypeChip({ code }: { code: string }) {
+  const style = chipStyle(code);
+  const isDefault = style.bg === "transparent";
+  return (
+    <span
+      className={
+        "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide" +
+        (isDefault ? " border border-tb-border" : "")
+      }
+      style={{ backgroundColor: style.bg, color: style.fg }}
+    >
+      {code}
+    </span>
+  );
+}
+
+function chipStyle(code: string): { bg: string; fg: string } {
+  const c = code.toUpperCase();
+  // Market-type chips come through here too ("NATIONAL", "US_STATE", etc.)
+  // We only theme the five entity-type codes called out in the brief.
+  if (c === "OP" || c === "OPERATOR")
+    return { bg: "#1A2433", fg: "#CBD5E1" };
+  if (c === "B2B" || c === "B2B_PLATFORM" || c === "B2B_SUPPLIER")
+    return { bg: "#242121", fg: "#D6D3D1" };
+  if (c === "AFF" || c === "AFFILIATE")
+    return { bg: "#1A2820", fg: "#BBF7D0" };
+  if (c === "LOT" || c === "LOTTERY")
+    return { bg: "#22192D", fg: "#DDD6FE" };
+  if (c === "DFS") return { bg: "#2A2418", fg: "#FCD34D" };
+  // default muted chip
+  return { bg: "transparent", fg: "#9CA3AF" };
 }

@@ -155,16 +155,17 @@ export async function getEntityLeaderboard(opts: {
   if (opts.marketSlug) params.push(opts.marketSlug);
   if (opts.entityTypeCode) params.push(opts.entityTypeCode);
 
-  // Period filter — when set, pin the "latest" to this period; otherwise newest available
+  // G2: keep scoped unfiltered by period so spark_raw carries multi-period
+  // history. Period selection is applied to the `latest` pick, not the CTE.
   const periodParamIdx = params.length + 1;
   if (opts.periodCode) params.push(opts.periodCode);
-  const periodFilter = opts.periodCode
-    ? `AND p.code = $${periodParamIdx}`
-    : "";
+  const latestFilter = opts.periodCode
+    ? `AND latest.period_code = $${periodParamIdx}`
+    : `AND latest.rn = 1`;
 
   // Dedup: within scoped rows, pick exactly one row per entity using ROW_NUMBER
-  // over (entity_id, period start desc, source precedence). If period is pinned,
-  // we only include that period and still take 1 per entity.
+  // over (entity_id, period start desc, source precedence). Then within
+  // dedup'd rows, rn counts back from most-recent so rn<=N feeds the spark.
   const sql = `
     WITH scoped AS (
       SELECT mvc.entity_id, mvc.metric_id, mvc.period_id,
@@ -206,7 +207,6 @@ export async function getEntityLeaderboard(opts: {
         AND e.is_active = true
         ${marketJoin}
         ${typeFilter}
-        ${periodFilter}
         AND mvc.entity_id IS NOT NULL
     ),
     per_entity AS (
@@ -241,7 +241,7 @@ export async function getEntityLeaderboard(opts: {
             JOIN entity_types et ON et.id = eta.entity_type_id
             WHERE eta.entity_id = e.id) AS entity_type_codes
     FROM entities e
-    JOIN per_entity latest ON latest.entity_id = e.id AND latest.rn = 1
+    JOIN per_entity latest ON latest.entity_id = e.id ${latestFilter}
     LEFT JOIN per_entity prev ON prev.entity_id = e.id
       AND prev.start_date <= (latest.start_date - INTERVAL '330 days')::date
       AND prev.start_date >= (latest.start_date - INTERVAL '400 days')::date
@@ -315,12 +315,16 @@ export async function getMarketLeaderboard(opts: {
   const sparkLen = opts.sparkLen ?? 8;
   const params: unknown[] = [opts.metricCode, sparkLen];
   let idx = 3;
-  const periodFilter = opts.periodCode
-    ? (params.push(opts.periodCode), `AND p.code = $${idx++}`)
-    : "";
+  // G2: don't pre-filter scoped by period — we need the full history for spark
+  const periodParamIdx = opts.periodCode
+    ? (params.push(opts.periodCode), idx++)
+    : null;
   const typeFilter = opts.marketType
     ? (params.push(opts.marketType), `AND mk.market_type = $${idx++}`)
     : "";
+  const latestFilter = periodParamIdx
+    ? `AND latest.period_code = $${periodParamIdx}`
+    : `AND latest.rn = 1`;
 
   const sql = `
     WITH scoped AS (
@@ -357,7 +361,6 @@ export async function getMarketLeaderboard(opts: {
       WHERE m.code = $1
         AND mvc.market_id IS NOT NULL
         AND mvc.entity_id IS NULL
-        ${periodFilter}
     ),
     per_market AS (
       SELECT s.*,
@@ -396,7 +399,7 @@ export async function getMarketLeaderboard(opts: {
             FROM metric_value_canonical mvc3
             WHERE mvc3.market_id = mk.id) AS beacon_coverage_pct
     FROM markets mk
-    JOIN per_market latest ON latest.market_id = mk.id AND latest.rn = 1
+    JOIN per_market latest ON latest.market_id = mk.id ${latestFilter}
     LEFT JOIN per_market prev ON prev.market_id = mk.id
       AND prev.start_date <= (latest.start_date - INTERVAL '330 days')::date
       AND prev.start_date >= (latest.start_date - INTERVAL '400 days')::date

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import {
   listRecentReports,
-  getDiscrepancies,
 } from "@/lib/queries/reports";
 import {
   getEntityLeaderboard,
@@ -13,20 +12,24 @@ import {
 } from "@/lib/queries/periods";
 import { getTickerStrip } from "@/lib/queries/stocks";
 import {
+  getBiggestRevenueGrowers,
+  getMarginExpansionLeaders,
+  getRecentCommentary,
+} from "@/lib/queries/movers";
+import {
   adaptEntityLeaderboardRows,
   adaptMarketLeaderboardRows,
 } from "@/lib/adapters";
 import { query } from "@/lib/db";
 import { Leaderboard } from "@/components/primitives/leaderboard";
 import { TickerStrip } from "@/components/overview/ticker-strip";
+import { MoversRow } from "@/components/overview/movers-row";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { Badge } from "@/components/ui/badge";
 import { ReportLink } from "@/components/reports/report-link";
-import { SourceLabel } from "@/components/beacon/source-label";
 import { OperatorsSubTabs } from "./operators-sub-tabs";
 import { formatDate } from "@/lib/format";
-import type { SourceType } from "@/lib/types";
-import { AlertTriangle } from "lucide-react";
+import type { Report } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -51,10 +54,12 @@ export default async function HomePage({
     marketRaw,
     entityRaw,
     recentReports,
-    discrepancies,
     ticker,
     dataDrops,
     populatedPeriods,
+    growers,
+    marginLeaders,
+    commentary,
   ] = await Promise.all([
     getMarketLeaderboard({
       metricCode: "online_ggr",
@@ -67,11 +72,13 @@ export default async function HomePage({
       periodCode,
       limit: 15,
     }),
-    listRecentReports(10),
-    getDiscrepancies(5),
+    listRecentReports(7),
     getTickerStrip(15),
-    getDataDrops(8),
+    getDataDrops(6),
     listPopulatedPeriods(),
+    getBiggestRevenueGrowers(6),
+    getMarginExpansionLeaders(6),
+    getRecentCommentary(5),
   ]);
   const periodGroups = groupPeriodsForSelector(populatedPeriods);
 
@@ -79,10 +86,10 @@ export default async function HomePage({
   const entities = adaptEntityLeaderboardRows(entityRaw);
 
   return (
-    <div className="-mx-6 -mt-5">
+    <div className="-mx-6 -mt-3">
       <TickerStrip rows={ticker} />
 
-      <div className="space-y-4 px-6 py-4">
+      <div className="space-y-3 px-6 py-3">
         <header className="flex items-end justify-between">
           <div>
             <h1 className="text-lg font-semibold">Overview</h1>
@@ -94,8 +101,8 @@ export default async function HomePage({
           <PeriodSelector groups={periodGroups} currentCode={periodCode} />
         </header>
 
-        {/* Panel A + B: Markets leaderboard (2/3) · Recent reports (1/3) */}
-        <div className="grid gap-4 lg:grid-cols-3">
+        {/* Panel A + B: Markets leaderboard (2/3) · Right column stacked (1/3) */}
+        <div className="grid gap-3 lg:grid-cols-3">
           <Leaderboard
             className="lg:col-span-2"
             title="Markets"
@@ -112,65 +119,15 @@ export default async function HomePage({
               "sparkline",
               "beacon_coverage",
             ]}
-            maxRows={15}
+            maxRows={12}
             showViewAll
             viewAllHref="/markets"
           />
 
-          {/* Recent reports */}
-          <div className="rounded-md border border-tb-border bg-tb-surface">
-            <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-                Recent reports
-              </h3>
-              <Link
-                href="/reports"
-                className="text-[10px] text-tb-blue hover:underline"
-              >
-                View all →
-              </Link>
-            </div>
-            <ul className="divide-y divide-tb-border/60">
-              {recentReports.length === 0 && (
-                <li className="p-4 text-[11px] text-tb-muted">
-                  No reports yet.
-                </li>
-              )}
-              {recentReports.map((r) => {
-                const subjects: string[] = [
-                  ...(r.entity_names ?? []).slice(0, 2),
-                  ...(r.market_names ?? []).slice(0, 2),
-                ];
-                return (
-                  <li
-                    key={r.id}
-                    className="px-3 py-2 transition-colors hover:bg-tb-border/25"
-                  >
-                    <ReportLink
-                      reportId={r.id}
-                      className="block w-full text-left"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-[11px] font-medium text-tb-text">
-                          {r.filename}
-                        </span>
-                        <span className="shrink-0 font-mono text-[10px] text-tb-muted">
-                          {formatDate(r.published_timestamp)}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-tb-muted">
-                        <Badge variant="muted">{r.document_type}</Badge>
-                        {subjects.length > 0 && (
-                          <span className="truncate">
-                            {subjects.slice(0, 3).join(" · ")}
-                          </span>
-                        )}
-                      </div>
-                    </ReportLink>
-                  </li>
-                );
-              })}
-            </ul>
+          {/* Right column: Recent reports stacked with Data drops (O1) */}
+          <div className="space-y-3">
+            <RecentReportsCard reports={recentReports} />
+            <DataDropsCard drops={dataDrops} />
           </div>
         </div>
 
@@ -192,180 +149,258 @@ export default async function HomePage({
               "sparkline",
               "ticker",
             ]}
-            maxRows={15}
+            maxRows={12}
             showViewAll
             viewAllHref={`/companies?type=${sub.code}`}
           />
         </div>
 
-        {/* Panel D: Data drops feed + discrepancies */}
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="rounded-md border border-tb-border bg-tb-surface lg:col-span-2">
-            <div className="border-b border-tb-border px-3 py-2">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-                Recent data drops
-              </h3>
-            </div>
-            <ul className="divide-y divide-tb-border/60">
-              {dataDrops.length === 0 && (
-                <li className="p-4 text-[11px] text-tb-muted">
-                  No recent data.
-                </li>
-              )}
-              {dataDrops.map((d, i) => (
-                <li key={i} className="flex items-center gap-2 px-3 py-1.5">
-                  <span
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                      d.is_beacon ? "bg-tb-beacon" : "bg-tb-success"
-                    }`}
-                  />
-                  <span className="flex-1 truncate text-[11px]">
-                    <span className="text-tb-muted">
-                      {relativeTime(d.created_at)} —{" "}
-                    </span>
-                    {d.subject_slug ? (
-                      <Link
-                        href={
-                          d.subject_kind === "entity"
-                            ? `/companies/${d.subject_slug}`
-                            : `/markets/${d.subject_slug}`
-                        }
-                        className="text-tb-text hover:text-tb-blue"
-                      >
-                        {d.subject_name}
-                      </Link>
-                    ) : (
-                      <span>{d.subject_name ?? "—"}</span>
-                    )}{" "}
-                    <span className="text-tb-text">
-                      {d.metric_name} {d.period_label}
-                    </span>
-                    : <span className="font-mono text-tb-text">{d.value_display}</span>
-                    {d.is_beacon && <sup className="beacon-tm">™</sup>}
-                  </span>
-                  <SourceLabel source={d.source_type} />
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Discrepancy alerts */}
-          <div className="rounded-md border border-tb-border bg-tb-surface">
-            <div className="flex items-center gap-1.5 border-b border-tb-border px-3 py-2">
-              <AlertTriangle className="h-3 w-3 text-tb-danger" />
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-                Discrepancies
-              </h3>
-              <span className="ml-auto font-mono text-[10px] text-tb-muted">
-                {discrepancies.length}
-              </span>
-            </div>
-            <ul className="divide-y divide-tb-border/60">
-              {discrepancies.length === 0 && (
-                <li className="p-4 text-[11px] text-tb-muted">
-                  No discrepancies &gt;5% between sources.
-                </li>
-              )}
-              {discrepancies.map((d, i) => (
-                <li key={i} className="px-3 py-2">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="truncate text-[11px] font-medium">
-                      {d.metric_display_name}
-                    </span>
-                    <span className="shrink-0 font-mono text-[11px] text-tb-danger">
-                      Δ {Number(d.variance_pct).toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-tb-muted">
-                    {d.entity_slug ? (
-                      <Link
-                        href={`/companies/${d.entity_slug}`}
-                        className="hover:text-tb-blue"
-                      >
-                        {d.entity_name}
-                      </Link>
-                    ) : d.market_slug ? (
-                      <Link
-                        href={`/markets/${d.market_slug}`}
-                        className="hover:text-tb-blue"
-                      >
-                        {d.market_name}
-                      </Link>
-                    ) : null}
-                    {" · "}
-                    <span className="font-mono">{d.period_code}</span>
-                    {" · "}
-                    <span className="font-mono">
-                      {d.source_count} sources
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        {/* Panel D: Revenue growers · Margin leaders · Recent commentary (O2) */}
+        <MoversRow
+          growers={growers}
+          marginLeaders={marginLeaders}
+          commentary={commentary}
+        />
       </div>
     </div>
   );
 }
 
-// Data drops: most recently created metric_values, enriched with subject.
-async function getDataDrops(limit = 8) {
-  return await query<{
+// Recent reports compact list — 7 rows, tighter density.
+function RecentReportsCard({
+  reports,
+}: {
+  reports: (Report & {
+    entity_names: string[] | null;
+    market_names: string[] | null;
+  })[];
+}) {
+  return (
+    <div className="rounded-md border border-tb-border bg-tb-surface">
+      <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+          Recent reports
+        </h3>
+        <Link
+          href="/reports"
+          className="text-[10px] text-tb-blue hover:underline"
+        >
+          View all →
+        </Link>
+      </div>
+      <ul className="divide-y divide-tb-border/60">
+        {reports.length === 0 && (
+          <li className="p-3 text-[11px] text-tb-muted">No reports yet.</li>
+        )}
+        {reports.map((r) => {
+          const subjects: string[] = [
+            ...(r.entity_names ?? []).slice(0, 2),
+            ...(r.market_names ?? []).slice(0, 2),
+          ];
+          return (
+            <li
+              key={r.id}
+              className="px-3 py-1.5 transition-colors hover:bg-tb-border/25"
+            >
+              <ReportLink
+                reportId={r.id}
+                className="block w-full text-left"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-[11px] font-medium text-tb-text">
+                    {r.filename}
+                  </span>
+                  <span className="shrink-0 font-mono text-[9px] text-tb-muted">
+                    {formatDate(r.published_timestamp)}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-tb-muted">
+                  <Badge variant="muted">{r.document_type}</Badge>
+                  {subjects.length > 0 && (
+                    <span className="truncate">
+                      {subjects.slice(0, 3).join(" · ")}
+                    </span>
+                  )}
+                </div>
+              </ReportLink>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// O1 — DATA DROPS. Synthesized from most recent activity across pipelines
+// (no dedicated activity_log table exists). One row per pipeline event,
+// newest first. Green dot = last 24h, grey = older.
+type DataDropRow = {
+  timestamp: string;
+  pipeline: string;
+  detail: string;
+};
+
+function DataDropsCard({ drops }: { drops: DataDropRow[] }) {
+  const now = Date.now();
+  return (
+    <div className="rounded-md border border-tb-border bg-tb-surface">
+      <div className="border-b border-tb-border px-3 py-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+          Data drops
+        </h3>
+        <p className="mt-0.5 text-[10px] text-tb-muted">
+          Recent ingest activity across pipelines
+        </p>
+      </div>
+      <ul className="divide-y divide-tb-border/60">
+        {drops.length === 0 && (
+          <li className="p-3 text-[11px] text-tb-muted">
+            No recent activity.
+          </li>
+        )}
+        {drops.map((d, i) => {
+          const t = new Date(d.timestamp).getTime();
+          const isFresh = !Number.isNaN(t) && now - t < 24 * 3600 * 1000;
+          return (
+            <li
+              key={i}
+              className="flex items-start gap-2 px-3 py-1.5 text-[11px]"
+            >
+              <span
+                className={
+                  "mt-1 h-1.5 w-1.5 shrink-0 rounded-full " +
+                  (isFresh ? "bg-tb-success" : "bg-tb-border")
+                }
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate font-medium text-tb-text">
+                    {d.pipeline}
+                  </span>
+                  <span className="shrink-0 font-mono text-[9px] text-tb-muted">
+                    {relativeTime(d.timestamp)}
+                  </span>
+                </div>
+                <div className="mt-0.5 truncate text-[10px] text-tb-muted">
+                  {d.detail}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+// Synthesize DataDrops from recent ingest activity. No activity_log table
+// exists, so we roll up: (a) newest parsed report, (b) newest regulator
+// filing ingest, (c) newest stock API ingest, (d) entity auto-add burst, etc.
+async function getDataDrops(limit = 6): Promise<DataDropRow[]> {
+  // 1) Most recent parser run — bucket reports in the last 24h as one "drop"
+  const recentReports = await query<{
     created_at: string;
-    metric_code: string;
-    metric_name: string;
-    period_label: string;
-    value_display: string;
-    source_type: SourceType;
-    disclosure_status: string;
-    is_beacon: boolean;
-    subject_kind: "entity" | "market" | null;
-    subject_name: string | null;
-    subject_slug: string | null;
+    n: number;
   }>(
-    `SELECT mv.created_at,
-            m.code AS metric_code,
-            m.display_name AS metric_name,
-            COALESCE(p.display_name, p.code) AS period_label,
-            CASE
-              WHEN m.unit_type = 'percentage' THEN
-                COALESCE(ROUND(mv.value_numeric, 2)::text || '%', '—')
-              WHEN m.unit_type = 'currency' AND mv.unit_multiplier = 'millions' THEN
-                COALESCE(CONCAT(COALESCE(mv.currency, ''), ROUND(mv.value_numeric, 1)::text, 'M'), '—')
-              WHEN m.unit_type = 'currency' AND mv.unit_multiplier = 'billions' THEN
-                COALESCE(CONCAT(COALESCE(mv.currency, ''), ROUND(mv.value_numeric, 2)::text, 'B'), '—')
-              WHEN m.unit_type = 'currency' THEN
-                COALESCE(CONCAT(COALESCE(mv.currency, ''), ROUND(mv.value_numeric, 2)::text), '—')
-              WHEN m.unit_type = 'count' AND mv.unit_multiplier IN ('thousands','millions','billions') THEN
-                COALESCE(CONCAT(ROUND(mv.value_numeric, 1)::text, LEFT(UPPER(mv.unit_multiplier), 1)), '—')
-              ELSE COALESCE(mv.value_numeric::text, mv.value_text, '—')
-            END AS value_display,
-            s.source_type,
-            mv.disclosure_status,
-            (mv.disclosure_status IN ('beacon_estimate','derived')) AS is_beacon,
-            CASE
-              WHEN mv.entity_id IS NOT NULL THEN 'entity'::text
-              WHEN mv.market_id IS NOT NULL THEN 'market'::text
-              ELSE NULL
-            END AS subject_kind,
-            COALESCE(e.name, mk.name) AS subject_name,
-            COALESCE(e.slug, mk.slug) AS subject_slug
+    `SELECT MAX(parsed_at) AS created_at, COUNT(*)::int AS n
+     FROM reports
+     WHERE parsed_at IS NOT NULL
+       AND parsed_at > NOW() - INTERVAL '7 days'`,
+  );
+  // 2) Latest regulator-filing metric value — scraper output
+  const recentReg = await query<{
+    created_at: string;
+    market_name: string | null;
+    n: number;
+  }>(
+    `SELECT MAX(mv.created_at) AS created_at,
+            (SELECT mk.name FROM markets mk
+             JOIN metric_values mv2 ON mv2.market_id = mk.id
+             JOIN sources s ON s.id = mv2.source_id
+             WHERE s.source_type = 'regulator_filing'
+             ORDER BY mv2.created_at DESC LIMIT 1) AS market_name,
+            COUNT(*)::int AS n
+     FROM metric_values mv
+     JOIN sources s ON s.id = mv.source_id
+     WHERE s.source_type = 'regulator_filing'
+       AND mv.created_at > NOW() - INTERVAL '30 days'`,
+  );
+  // 3) Latest stock price ingest
+  const recentStock = await query<{
+    created_at: string;
+    n: number;
+  }>(
+    `SELECT MAX(mv.created_at) AS created_at, COUNT(DISTINCT mv.entity_id)::int AS n
      FROM metric_values mv
      JOIN metrics m ON m.id = mv.metric_id
-     JOIN periods p ON p.id = mv.period_id
-     JOIN sources s ON s.id = mv.source_id
-     LEFT JOIN entities e ON e.id = mv.entity_id
-     LEFT JOIN markets mk ON mk.id = mv.market_id
-     WHERE mv.value_numeric IS NOT NULL
-     ORDER BY mv.created_at DESC
-     LIMIT $1`,
-    [limit],
+     WHERE m.code IN ('stock_price', 'market_cap')
+       AND mv.created_at > NOW() - INTERVAL '7 days'`,
   );
+  // 4) New entity auto-additions (needs_review flag)
+  const recentEntities = await query<{
+    created_at: string;
+    n: number;
+  }>(
+    `SELECT MAX(created_at) AS created_at, COUNT(*)::int AS n
+     FROM entities
+     WHERE extra_metadata->>'status' = 'auto_added_needs_review'
+       AND created_at > NOW() - INTERVAL '30 days'`,
+  );
+  // 5) Narrative extraction — parser secondary output
+  const recentNarr = await query<{
+    created_at: string;
+    n: number;
+  }>(
+    `SELECT MAX(n.created_at) AS created_at, COUNT(*)::int AS n
+     FROM narratives n
+     WHERE n.created_at > NOW() - INTERVAL '7 days'`,
+  );
+
+  const drops: DataDropRow[] = [];
+  if (recentReports[0]?.created_at && recentReports[0].n > 0) {
+    drops.push({
+      timestamp: recentReports[0].created_at,
+      pipeline: "Parser reprocess",
+      detail: `${recentReports[0].n} report${recentReports[0].n === 1 ? "" : "s"} · last 7d`,
+    });
+  }
+  if (recentReg[0]?.created_at && recentReg[0].n > 0) {
+    drops.push({
+      timestamp: recentReg[0].created_at,
+      pipeline: `Regulator scrape${recentReg[0].market_name ? ` · ${recentReg[0].market_name}` : ""}`,
+      detail: `${recentReg[0].n} row${recentReg[0].n === 1 ? "" : "s"} · last 30d`,
+    });
+  }
+  if (recentStock[0]?.created_at && recentStock[0].n > 0) {
+    drops.push({
+      timestamp: recentStock[0].created_at,
+      pipeline: "Stock prices refreshed",
+      detail: `${recentStock[0].n} ticker${recentStock[0].n === 1 ? "" : "s"}`,
+    });
+  }
+  if (recentNarr[0]?.created_at && recentNarr[0].n > 0) {
+    drops.push({
+      timestamp: recentNarr[0].created_at,
+      pipeline: "Narrative extraction",
+      detail: `${recentNarr[0].n} narrative${recentNarr[0].n === 1 ? "" : "s"} extracted`,
+    });
+  }
+  if (recentEntities[0]?.created_at && recentEntities[0].n > 0) {
+    drops.push({
+      timestamp: recentEntities[0].created_at,
+      pipeline: "Entity auto-add",
+      detail: `${recentEntities[0].n} new entities pending review`,
+    });
+  }
+  drops.sort((a, b) =>
+    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+  return drops.slice(0, limit);
 }
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "—";
   const now = Date.now();
   const diff = Math.max(0, now - then);
   const mins = Math.floor(diff / 60000);

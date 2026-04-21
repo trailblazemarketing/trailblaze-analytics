@@ -17,7 +17,7 @@ export function AppShell({
         email={email}
         onSignOut={() => startTransition(() => signOutAction())}
       />
-      <main className="flex-1 px-6 py-5">{children}</main>
+      <main className="flex-1 px-6 py-3">{children}</main>
     </div>
   );
 }
