@@ -343,7 +343,7 @@ async function getDataDrops(limit = 6): Promise<DataDropRow[]> {
   }>(
     `SELECT MAX(created_at) AS created_at, COUNT(*)::int AS n
      FROM entities
-     WHERE extra_metadata->>'status' = 'auto_added_needs_review'
+     WHERE metadata->>'status' = 'auto_added_needs_review'
        AND created_at > NOW() - INTERVAL '30 days'`,
   );
   // 5) Narrative extraction — parser secondary output

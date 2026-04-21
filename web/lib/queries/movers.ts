@@ -29,7 +29,7 @@ export async function getBiggestRevenueGrowers(limit = 6): Promise<MoverRow[]> {
        SELECT mvc.entity_id, mvc.value_numeric, mvc.unit_multiplier, mvc.currency,
               mvc.disclosure_status,
               p.start_date, p.end_date, p.code AS period_code,
-              fx.eur_rate::text AS eur_rate,
+              fx.eur_rate::numeric AS eur_rate,
               ROW_NUMBER() OVER (
                 PARTITION BY mvc.entity_id, p.start_date
                 ORDER BY CASE mvc.disclosure_status WHEN 'disclosed' THEN 1 ELSE 2 END
@@ -74,7 +74,10 @@ export async function getBiggestRevenueGrowers(limit = 6): Promise<MoverRow[]> {
                       AND start_date >= (cur.start_date - INTERVAL '400 days')::date)
      WHERE cur.value_numeric IS NOT NULL AND prev.value_numeric IS NOT NULL
        AND prev.value_numeric <> 0
-     ORDER BY yoy_pct::numeric DESC NULLS LAST
+     ORDER BY (
+       (cur.value_numeric / NULLIF(cur.eur_rate, 0)) -
+       (prev.value_numeric / NULLIF(prev.eur_rate, 0))
+     ) / NULLIF(ABS(prev.value_numeric / NULLIF(prev.eur_rate, 0)), 0) DESC NULLS LAST
      LIMIT $1`,
     [limit],
   );
@@ -137,7 +140,7 @@ export async function getMarginExpansionLeaders(limit = 6): Promise<MoverRow[]> 
                       start_date <= (cur.start_date - INTERVAL '330 days')::date
                       AND start_date >= (cur.start_date - INTERVAL '400 days')::date)
      WHERE cur.value_numeric IS NOT NULL AND prev.value_numeric IS NOT NULL
-     ORDER BY pp_change::numeric DESC NULLS LAST
+     ORDER BY (cur.value_numeric - prev.value_numeric) DESC NULLS LAST
      LIMIT $1`,
     [limit],
   );
