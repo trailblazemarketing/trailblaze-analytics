@@ -18,11 +18,14 @@ export function StockHeatmap({ cells }: { cells: HeatmapCell[] }) {
     );
   }
 
-  // Sort by market cap desc, nulls last
+  // Sort: priced entities by market-cap desc first, then unpriced entities
+  // alphabetically at the end so they fill the small slots on the right.
   const sorted = [...cells].sort((a, b) => {
-    const ac = a.market_cap_eur ?? 0;
-    const bc = b.market_cap_eur ?? 0;
-    return bc - ac;
+    const ap = a.has_price && a.market_cap_eur ? 1 : 0;
+    const bp = b.has_price && b.market_cap_eur ? 1 : 0;
+    if (ap !== bp) return bp - ap;
+    if (ap === 0) return a.name.localeCompare(b.name);
+    return (b.market_cap_eur ?? 0) - (a.market_cap_eur ?? 0);
   });
 
   const maxCap = Math.max(...sorted.map((c) => c.market_cap_eur ?? 0), 1);
