@@ -68,12 +68,17 @@ export default async function MarketsIndexPage({
   const filtered = lbRaw.filter((r) => allowed.has(r.market_id));
   const lb = adaptMarketLeaderboardRows(filtered);
 
+  // M3: helper context — total markets in the filter-narrowed universe vs
+  // how many have data for the currently-selected metric this period.
+  const totalInUniverse = markets.length;
+  const withData = lb.rows.length;
+
   const countries = Array.from(
     new Set(markets.map((m) => m.iso_country).filter(Boolean)),
   ).sort();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <header className="flex items-end justify-between">
         <div>
           <h1 className="text-lg font-semibold">Markets</h1>
@@ -162,6 +167,15 @@ export default async function MarketsIndexPage({
           </Link>
         )}
       </form>
+
+      {/* M3: coverage context for the selected metric */}
+      <p className="-mt-1 text-[10px] text-tb-muted">
+        Showing {withData} of {totalInUniverse} markets with data for{" "}
+        <span className="text-tb-text">{metric.label}</span>
+        {periodCode ? (
+          <> · period <span className="font-mono">{periodCode}</span></>
+        ) : null}
+      </p>
 
       <Leaderboard
         title={`Markets — ${metric.label}`}

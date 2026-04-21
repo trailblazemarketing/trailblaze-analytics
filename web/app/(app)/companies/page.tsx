@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   listCompanies,
   getEntityTypeCountsAll,
+  getCompaniesAggregateKpis,
 } from "@/lib/queries/companies";
 import { getEntityLeaderboard } from "@/lib/queries/analytics";
 import {
@@ -12,6 +13,7 @@ import { adaptEntityLeaderboardRows } from "@/lib/adapters";
 import { Leaderboard } from "@/components/primitives/leaderboard";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { Input } from "@/components/ui/input";
+import { formatEur } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -40,22 +42,24 @@ export default async function CompaniesIndexPage({
   const typeCode = searchParams.type || undefined;
   const periodCode = searchParams.period ?? null;
 
-  const [lbRaw, companies, typeCounts, populatedPeriods] = await Promise.all([
-    getEntityLeaderboard({
-      metricCode: metric.code,
-      entityTypeCode: typeCode,
-      periodCode,
-      limit: 120,
-    }),
-    listCompanies({
-      search: searchParams.q,
-      entity_type: searchParams.type,
-      country: searchParams.country,
-      exchange: searchParams.exchange,
-    }),
-    getEntityTypeCountsAll(),
-    listPopulatedPeriods(),
-  ]);
+  const [lbRaw, companies, typeCounts, populatedPeriods, kpis] =
+    await Promise.all([
+      getEntityLeaderboard({
+        metricCode: metric.code,
+        entityTypeCode: typeCode,
+        periodCode,
+        limit: 120,
+      }),
+      listCompanies({
+        search: searchParams.q,
+        entity_type: searchParams.type,
+        country: searchParams.country,
+        exchange: searchParams.exchange,
+      }),
+      getEntityTypeCountsAll(),
+      listPopulatedPeriods(),
+      getCompaniesAggregateKpis(),
+    ]);
   const periodGroups = groupPeriodsForSelector(populatedPeriods);
 
   // Narrow the leaderboard by the filter-applied company set
@@ -71,7 +75,7 @@ export default async function CompaniesIndexPage({
   ).sort();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <header className="flex items-end justify-between">
         <div>
           <h1 className="text-lg font-semibold">Companies</h1>
@@ -93,6 +97,33 @@ export default async function CompaniesIndexPage({
           </Link>
         </div>
       </header>
+
+      {/* C1: Aggregate KPI strip — 4 tiles */}
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-tb-border bg-tb-border md:grid-cols-4">
+        <KpiAggTile
+          label="Total tracked companies"
+          value={kpis.total_companies.toLocaleString()}
+        />
+        <KpiAggTile
+          label="Total combined revenue (LTM)"
+          value={formatEur(kpis.combined_revenue_eur)}
+          hint="Sum of latest-period revenue, EUR-converted"
+        />
+        <KpiAggTile
+          label="Avg EBITDA margin"
+          value={
+            kpis.weighted_ebitda_margin != null
+              ? `${kpis.weighted_ebitda_margin.toFixed(1)}%`
+              : "—"
+          }
+          hint="Weighted by revenue"
+        />
+        <KpiAggTile
+          label="Listed vs private"
+          value={`${kpis.listed} · ${kpis.private_count}`}
+          hint={`${kpis.listed} listed · ${kpis.private_count} private`}
+        />
+      </div>
 
       <form className="flex flex-wrap items-center gap-2" action="/companies">
         <Input
@@ -182,6 +213,28 @@ export default async function CompaniesIndexPage({
         ]}
         maxRows={60}
       />
+    </div>
+  );
+}
+
+function KpiAggTile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1 bg-tb-surface px-4 py-3">
+      <span className="text-[10px] uppercase tracking-wider text-tb-muted">
+        {label}
+      </span>
+      <span className="font-mono text-lg font-semibold text-tb-text">
+        {value}
+      </span>
+      {hint && <span className="text-[10px] text-tb-muted">{hint}</span>}
     </div>
   );
 }

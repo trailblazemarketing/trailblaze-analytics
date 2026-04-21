@@ -9,15 +9,20 @@ export interface HeatmapCell {
   latest_price: number | null;
   prev_price: number | null;
   day_change_pct: number | null;
-  size_value: number | null; // latest revenue in EUR (for treemap size)
+  size_value: number | null; // market cap in EUR (for treemap size)
   size_currency: string | null;
   has_price: boolean;
+  // For leaderboard (OP3)
+  market_cap_eur: number | null;
+  market_cap_native: number | null;
+  market_cap_currency: string | null;
+  ev_ebitda: number | null;
+  native_price_currency: string | null;
 }
 
-// Listed operators with stock price (when available) and a size metric
-// (latest revenue in EUR) for the treemap. We always include every listed
-// operator — if there's no price, the tile shows grey so the company is
-// still visible on the map.
+// Listed operators with stock price, market cap, EV/EBITDA multiple, and
+// sizing by market cap (EUR). Listed operators with no live price get a
+// grey tile so they remain visible on the heatmap universe.
 export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
   const rows = await query<{
     entity_id: string;
@@ -26,10 +31,12 @@ export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
     ticker: string;
     latest_price: string | null;
     prev_price: string | null;
-    rev_value: string | null;
-    rev_multiplier: string | null;
-    rev_currency: string | null;
-    rev_eur_rate: string | null;
+    price_currency: string | null;
+    mc_value: string | null;
+    mc_multiplier: string | null;
+    mc_currency: string | null;
+    mc_eur_rate: string | null;
+    evm: string | null;
   }>(
     `WITH price_ranked AS (
        SELECT mv.entity_id, mv.value_numeric::text AS price, mv.currency,
@@ -40,32 +47,42 @@ export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
        JOIN periods p ON p.id = mv.period_id
        WHERE m.code = 'stock_price' AND mv.value_numeric IS NOT NULL
      ),
-     rev_ranked AS (
-       SELECT mvc.entity_id, mvc.value_numeric::text AS rev,
-              mvc.unit_multiplier, mvc.currency AS rev_currency,
+     mc_ranked AS (
+       SELECT mv.entity_id, mv.value_numeric::text AS mc,
+              mv.unit_multiplier, mv.currency AS mc_currency,
               p.end_date, fx.eur_rate::text AS eur_rate,
-              ROW_NUMBER() OVER (PARTITION BY mvc.entity_id ORDER BY p.start_date DESC) AS rn
-       FROM metric_value_canonical mvc
-       JOIN metrics m ON m.id = mvc.metric_id
-       JOIN periods p ON p.id = mvc.period_id
+              ROW_NUMBER() OVER (PARTITION BY mv.entity_id ORDER BY p.start_date DESC) AS rn
+       FROM metric_values mv
+       JOIN metrics m ON m.id = mv.metric_id
+       JOIN periods p ON p.id = mv.period_id
        LEFT JOIN LATERAL (
          SELECT f.eur_rate FROM fx_rates f
-         WHERE f.currency_code = COALESCE(UPPER(mvc.currency), 'EUR')
+         WHERE f.currency_code = COALESCE(UPPER(mv.currency), 'EUR')
            AND f.rate_date <= p.end_date
          ORDER BY f.rate_date DESC LIMIT 1
        ) fx ON true
-       WHERE m.code = 'revenue' AND mvc.market_id IS NULL AND mvc.value_numeric IS NOT NULL
+       WHERE m.code = 'market_cap' AND mv.value_numeric IS NOT NULL
+     ),
+     ev_ranked AS (
+       SELECT mv.entity_id, mv.value_numeric::text AS evm,
+              ROW_NUMBER() OVER (PARTITION BY mv.entity_id ORDER BY mv.period_id DESC) AS rn
+       FROM metric_values mv
+       JOIN metrics m ON m.id = mv.metric_id
+       WHERE m.code = 'ev_ebitda_multiple' AND mv.value_numeric IS NOT NULL
      )
      SELECT e.id AS entity_id, e.name, e.slug, e.ticker,
             p1.price AS latest_price, p2.price AS prev_price,
-            r.rev AS rev_value, r.unit_multiplier AS rev_multiplier,
-            r.rev_currency, r.eur_rate AS rev_eur_rate
+            p1.currency AS price_currency,
+            mc.mc AS mc_value, mc.unit_multiplier AS mc_multiplier,
+            mc.mc_currency, mc.eur_rate AS mc_eur_rate,
+            ev.evm AS evm
      FROM entities e
      JOIN entity_type_assignments eta ON eta.entity_id = e.id
      JOIN entity_types et ON et.id = eta.entity_type_id
      LEFT JOIN price_ranked p1 ON p1.entity_id = e.id AND p1.rn = 1
      LEFT JOIN price_ranked p2 ON p2.entity_id = e.id AND p2.rn = 2
-     LEFT JOIN rev_ranked r ON r.entity_id = e.id AND r.rn = 1
+     LEFT JOIN mc_ranked mc ON mc.entity_id = e.id AND mc.rn = 1
+     LEFT JOIN ev_ranked ev ON ev.entity_id = e.id AND ev.rn = 1
      WHERE et.code = 'operator' AND e.ticker IS NOT NULL AND e.is_active = true
      ORDER BY e.name`,
   );
@@ -78,9 +95,8 @@ export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
         ? ((price - prev) / prev) * 100
         : null;
 
-    // Convert revenue to EUR for tile size
-    const revRaw = r.rev_value != null ? Number(r.rev_value) : null;
-    const mult = r.rev_multiplier;
+    const mcRaw = r.mc_value != null ? Number(r.mc_value) : null;
+    const mult = r.mc_multiplier;
     const scale =
       mult === "billions"
         ? 1_000_000_000
@@ -89,12 +105,12 @@ export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
         : mult === "thousands"
         ? 1_000
         : 1;
-    const revNative = revRaw != null ? revRaw * scale : null;
+    const mcNative = mcRaw != null ? mcRaw * scale : null;
     const eurRate =
-      r.rev_eur_rate != null && Number(r.rev_eur_rate) > 0
-        ? Number(r.rev_eur_rate)
+      r.mc_eur_rate != null && Number(r.mc_eur_rate) > 0
+        ? Number(r.mc_eur_rate)
         : 1;
-    const revEur = revNative != null ? revNative / eurRate : null;
+    const mcEur = mcNative != null ? mcNative / eurRate : null;
 
     return {
       entity_id: r.entity_id,
@@ -104,9 +120,14 @@ export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
       latest_price: price,
       prev_price: prev,
       day_change_pct: dcp,
-      size_value: revEur,
+      size_value: mcEur,
       size_currency: "EUR",
       has_price: price != null,
+      market_cap_eur: mcEur,
+      market_cap_native: mcNative,
+      market_cap_currency: r.mc_currency,
+      ev_ebitda: r.evm != null ? Number(r.evm) : null,
+      native_price_currency: r.price_currency,
     };
   });
 }

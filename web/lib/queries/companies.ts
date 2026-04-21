@@ -157,3 +157,88 @@ export async function getEntityTypeCountsAll(): Promise<
      ORDER BY count DESC, et.code`,
   );
 }
+
+// C1: aggregate KPIs for the Companies index scorecard strip.
+// total_companies: active entity count
+// combined_revenue_eur: latest-per-entity revenue, summed in EUR
+// weighted_ebitda_margin: Σ(margin × revenue_eur) / Σ(revenue_eur)
+// listed_vs_private: counts based on non-null ticker
+export async function getCompaniesAggregateKpis(): Promise<{
+  total_companies: number;
+  combined_revenue_eur: number | null;
+  weighted_ebitda_margin: number | null;
+  listed: number;
+  private_count: number;
+}> {
+  const rows = await query<{
+    total: number;
+    listed: number;
+    private_count: number;
+    combined_rev_eur: string | null;
+    weighted_margin: string | null;
+  }>(
+    `WITH latest_rev AS (
+       SELECT DISTINCT ON (mvc.entity_id) mvc.entity_id,
+              mvc.value_numeric, mvc.unit_multiplier, mvc.currency,
+              p.end_date,
+              fx.eur_rate::numeric AS eur_rate
+       FROM metric_value_canonical mvc
+       JOIN metrics m ON m.id = mvc.metric_id
+       JOIN periods p ON p.id = mvc.period_id
+       JOIN entities e ON e.id = mvc.entity_id
+       LEFT JOIN LATERAL (
+         SELECT f.eur_rate FROM fx_rates f
+         WHERE f.currency_code = COALESCE(UPPER(mvc.currency), 'EUR')
+           AND f.rate_date <= p.end_date
+         ORDER BY f.rate_date DESC LIMIT 1
+       ) fx ON true
+       WHERE m.code IN ('revenue','ngr')
+         AND mvc.entity_id IS NOT NULL AND mvc.market_id IS NULL
+         AND e.is_active = true
+         AND mvc.value_numeric IS NOT NULL
+         AND mvc.disclosure_status = 'disclosed'
+         AND p.period_type IN ('quarter','half_year','full_year','ltm')
+       ORDER BY mvc.entity_id, p.start_date DESC
+     ),
+     latest_margin AS (
+       SELECT DISTINCT ON (mvc.entity_id) mvc.entity_id,
+              mvc.value_numeric AS margin_pct
+       FROM metric_value_canonical mvc
+       JOIN metrics m ON m.id = mvc.metric_id
+       JOIN periods p ON p.id = mvc.period_id
+       JOIN entities e ON e.id = mvc.entity_id
+       WHERE m.code = 'ebitda_margin'
+         AND mvc.entity_id IS NOT NULL AND mvc.market_id IS NULL
+         AND e.is_active = true
+         AND mvc.value_numeric IS NOT NULL
+         AND mvc.disclosure_status = 'disclosed'
+       ORDER BY mvc.entity_id, p.start_date DESC
+     ),
+     rev_in_eur AS (
+       SELECT lr.entity_id,
+              (lr.value_numeric *
+                CASE lr.unit_multiplier
+                  WHEN 'billions' THEN 1000000000
+                  WHEN 'millions' THEN 1000000
+                  WHEN 'thousands' THEN 1000
+                  ELSE 1
+                END / NULLIF(lr.eur_rate, 0)) AS rev_eur
+       FROM latest_rev lr
+     )
+     SELECT
+       (SELECT COUNT(*)::int FROM entities WHERE is_active = true) AS total,
+       (SELECT COUNT(*)::int FROM entities WHERE is_active = true AND ticker IS NOT NULL) AS listed,
+       (SELECT COUNT(*)::int FROM entities WHERE is_active = true AND ticker IS NULL) AS private_count,
+       (SELECT SUM(rev_eur)::text FROM rev_in_eur) AS combined_rev_eur,
+       (SELECT (SUM(lm.margin_pct * re.rev_eur) / NULLIF(SUM(re.rev_eur), 0))::text
+          FROM latest_margin lm JOIN rev_in_eur re ON re.entity_id = lm.entity_id) AS weighted_margin`,
+  );
+  const r = rows[0];
+  return {
+    total_companies: r?.total ?? 0,
+    combined_revenue_eur: r?.combined_rev_eur ? Number(r.combined_rev_eur) : null,
+    weighted_ebitda_margin: r?.weighted_margin ? Number(r.weighted_margin) : null,
+    listed: r?.listed ?? 0,
+    private_count: r?.private_count ?? 0,
+  };
+}
