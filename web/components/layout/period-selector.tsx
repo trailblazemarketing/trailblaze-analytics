@@ -55,6 +55,47 @@ export function PeriodSelector({
   const current = currentCode ? all.find((p) => p.code === currentCode) : null;
   const label = current ? current.display_name ?? current.code : "Latest";
 
+  // Pass 5: granularity pill-group to filter which group is visible in the
+  // popover. Defaults to the tab that matches the currently-selected period,
+  // or "All" when none is set.
+  type Granularity = "all" | "Q" | "FY" | "M" | "LTM";
+  const inferGranularity = (): Granularity => {
+    if (!current) return "all";
+    if (groups.quarters.some((p) => p.code === current.code)) return "Q";
+    if (groups.fullYears.some((p) => p.code === current.code)) return "FY";
+    if (groups.months.some((p) => p.code === current.code)) return "M";
+    if (groups.trailing.some((p) => p.code === current.code)) return "LTM";
+    return "all";
+  };
+  const [granularity, setGranularity] =
+    React.useState<Granularity>(inferGranularity());
+
+  React.useEffect(() => {
+    setGranularity(inferGranularity());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCode]);
+
+  const visibleGroups = () => {
+    switch (granularity) {
+      case "Q":
+        return { quarters: groups.quarters };
+      case "FY":
+        return { fullYears: groups.fullYears };
+      case "M":
+        return { months: groups.months };
+      case "LTM":
+        return { trailing: groups.trailing };
+      default:
+        return {
+          quarters: groups.quarters,
+          trailing: groups.trailing,
+          fullYears: groups.fullYears,
+          months: groups.months,
+        };
+    }
+  };
+  const g = visibleGroups();
+
   return (
     <div className={cn("relative inline-block", className)} ref={ref}>
       <button
@@ -66,7 +107,31 @@ export function PeriodSelector({
         <ChevronDown className="h-3 w-3 text-tb-muted" />
       </button>
       {open && (
-        <div className="absolute right-0 top-8 z-40 w-64 overflow-hidden rounded-md border border-tb-border bg-tb-surface text-xs shadow-lg animate-fade-in">
+        <div className="absolute right-0 top-8 z-40 w-72 overflow-hidden rounded-md border border-tb-border bg-tb-surface text-xs shadow-lg animate-fade-in">
+          <div className="flex items-center gap-0.5 border-b border-tb-border bg-tb-bg p-1">
+            {(
+              [
+                { k: "all", label: "All" },
+                { k: "Q", label: "Q" },
+                { k: "M", label: "M" },
+                { k: "FY", label: "FY" },
+                { k: "LTM", label: "LTM" },
+              ] as { k: Granularity; label: string }[]
+            ).map((pill) => (
+              <button
+                key={pill.k}
+                onClick={() => setGranularity(pill.k)}
+                className={cn(
+                  "flex-1 rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors",
+                  granularity === pill.k
+                    ? "bg-tb-blue/20 text-tb-blue"
+                    : "text-tb-muted hover:text-tb-text",
+                )}
+              >
+                {pill.label}
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => pick(null)}
             className={cn(
@@ -77,10 +142,18 @@ export function PeriodSelector({
             <span>Latest (auto)</span>
             <span className="font-mono text-[10px] text-tb-muted">default</span>
           </button>
-          <Group label="Quarters" rows={groups.quarters} current={currentCode} onPick={pick} />
-          <Group label="Trailing" rows={groups.trailing} current={currentCode} onPick={pick} />
-          <Group label="Full years" rows={groups.fullYears} current={currentCode} onPick={pick} />
-          <Group label="Months" rows={groups.months} current={currentCode} onPick={pick} />
+          {g.quarters && (
+            <Group label="Quarters" rows={g.quarters} current={currentCode} onPick={pick} />
+          )}
+          {g.trailing && (
+            <Group label="Trailing" rows={g.trailing} current={currentCode} onPick={pick} />
+          )}
+          {g.fullYears && (
+            <Group label="Full years" rows={g.fullYears} current={currentCode} onPick={pick} />
+          )}
+          {g.months && (
+            <Group label="Months" rows={g.months} current={currentCode} onPick={pick} />
+          )}
         </div>
       )}
     </div>

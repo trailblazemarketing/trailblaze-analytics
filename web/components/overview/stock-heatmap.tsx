@@ -61,18 +61,24 @@ function HeatTile({
   rowSpan: number;
 }) {
   const { ticker, name, slug, latest_price, day_change_pct, has_price } = cell;
-  // Color by day change. Intensity mapped to sqrt so a ±1% move shows color.
+  // Pass 4: saturated flat colors matching the Gemini mockup.
+  // 4-bucket mapping on abs(dcp) — ≤0.5% / ≤1.5% / ≤3% / >3% — keeps tiles
+  // visually distinct at a glance instead of blending into surface color.
   const dcp = day_change_pct;
-  const intensity = dcp != null ? Math.min(1, Math.sqrt(Math.abs(dcp) / 6)) : 0;
+  const abs = dcp != null ? Math.abs(dcp) : 0;
+  const bucket = abs <= 0.5 ? 0 : abs <= 1.5 ? 1 : abs <= 3 ? 2 : 3;
   const bg = !has_price
-    ? "color-mix(in srgb, var(--tb-border) 55%, var(--tb-surface))"
+    ? "#1A1D24"
     : dcp == null
     ? "var(--tb-surface)"
-    : dcp > 0.05
-    ? `color-mix(in srgb, var(--tb-success) ${(intensity * 70).toFixed(0)}%, var(--tb-surface))`
-    : dcp < -0.05
-    ? `color-mix(in srgb, var(--tb-danger) ${(intensity * 70).toFixed(0)}%, var(--tb-surface))`
+    : dcp > 0
+    ? GAIN[bucket]
+    : dcp < 0
+    ? LOSS[bucket]
     : "var(--tb-surface)";
+  const fg = !has_price || dcp == null || Math.abs(dcp) <= 0.5
+    ? "text-tb-text"
+    : "text-white";
 
   const tileTitle = `${name} (${ticker})${
     latest_price != null ? ` · ${latest_price.toFixed(2)}` : ""
@@ -82,7 +88,10 @@ function HeatTile({
     <Link
       href={`/companies/${slug}`}
       title={tileTitle}
-      className="relative flex flex-col justify-between overflow-hidden p-1.5 transition-opacity hover:opacity-90"
+      className={
+        "relative flex flex-col justify-between overflow-hidden p-1.5 transition-opacity hover:opacity-90 " +
+        fg
+      }
       style={{
         background: bg,
         gridColumn: `span ${colSpan} / span ${colSpan}`,
@@ -90,34 +99,36 @@ function HeatTile({
       }}
     >
       <div className="flex items-center justify-between gap-1">
-        <span className="truncate font-mono text-[11px] font-semibold text-tb-text">
+        <span className="truncate font-mono text-[11px] font-semibold">
           {ticker}
         </span>
         {dcp != null && (
-          <span
-            className={
-              "shrink-0 font-mono text-[10px] " +
-              (dcp > 0
-                ? "text-tb-success"
-                : dcp < 0
-                ? "text-tb-danger"
-                : "text-tb-muted")
-            }
-          >
+          <span className="shrink-0 font-mono text-[10px] opacity-95">
             {dcp > 0 ? "+" : ""}
             {dcp.toFixed(1)}%
           </span>
         )}
         {dcp == null && has_price && (
-          <span className="font-mono text-[9px] text-tb-muted">—</span>
+          <span className="font-mono text-[9px] opacity-70">—</span>
         )}
       </div>
-      {/* Show company short-name only if the tile is wide enough */}
       {(colSpan >= 2 || rowSpan >= 2) && (
-        <span className="truncate text-[9px] leading-tight text-tb-text/80">
+        <span className="truncate text-[9px] leading-tight opacity-85">
           {name}
+        </span>
+      )}
+      {(colSpan >= 3 || rowSpan >= 2) && latest_price != null && (
+        <span className="font-mono text-[9px] opacity-75">
+          {latest_price < 1000
+            ? latest_price.toFixed(2)
+            : latest_price.toFixed(0)}
         </span>
       )}
     </Link>
   );
 }
+
+// Flat saturated palette — aligns to the Gemini Finviz-style treemap.
+// Small moves stay subtle; big moves saturate. Text flips to white at bucket 1+.
+const GAIN = ["#123922", "#15803D", "#16A34A", "#10B981"];
+const LOSS = ["#3A1414", "#991B1B", "#DC2626", "#EF4444"];
