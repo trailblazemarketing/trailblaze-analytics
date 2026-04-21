@@ -133,6 +133,7 @@ export async function listReports(
     document_type?: string;
     parse_status?: string;
     search?: string;
+    sort?: "newest" | "oldest";
   } = {},
   limit = 200,
 ) {
@@ -151,14 +152,30 @@ export async function listReports(
     clauses.push(`filename ILIKE $${params.length}`);
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const order =
+    filters.sort === "oldest"
+      ? "published_timestamp ASC NULLS LAST, parsed_at ASC NULLS LAST"
+      : "published_timestamp DESC NULLS LAST, parsed_at DESC NULLS LAST";
   params.push(limit);
   return await query<Report>(
     `SELECT id, filename, document_type, published_timestamp, parse_status,
             metric_count, parser_version, parsed_at
      FROM reports
      ${where}
-     ORDER BY published_timestamp DESC NULLS LAST, parsed_at DESC NULLS LAST
+     ORDER BY ${order}
      LIMIT $${params.length}`,
     params,
+  );
+}
+
+// R1: per-document-type counts for filter chips
+export async function getReportTypeCounts(): Promise<
+  { document_type: string; count: number }[]
+> {
+  return await query(
+    `SELECT document_type, COUNT(*)::int AS count
+     FROM reports
+     GROUP BY document_type
+     ORDER BY count DESC`,
   );
 }

@@ -9,6 +9,8 @@ import { getBeaconEstimatesForValues } from "@/lib/queries/markets";
 import {
   getScorecardSeries,
   getEntityLeaderboard,
+  nativeToEur,
+  toRawNumeric,
 } from "@/lib/queries/analytics";
 import {
   listPopulatedPeriods,
@@ -16,18 +18,25 @@ import {
 } from "@/lib/queries/periods";
 import { adaptEntityLeaderboardRows } from "@/lib/adapters";
 import { buildPanelTiles, PANELS, type PanelKind } from "@/lib/scorecard-builder";
-import { Scorecard } from "@/components/primitives/scorecard";
 import { Leaderboard } from "@/components/primitives/leaderboard";
 import { TimeMatrix } from "@/components/primitives/time-matrix";
 import type {
   TimeMatrixRow,
   TimeMatrixCell,
 } from "@/components/primitives/time-matrix";
+import {
+  MetricTimeseries,
+  type TimeseriesPoint,
+  type BeaconFlags,
+} from "@/components/charts/metric-timeseries";
+import { Sparkline } from "@/components/beacon/sparkline";
+import { DeltaChip } from "@/components/beacon/delta-chip";
+import { SourceLabel } from "@/components/beacon/source-label";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { ReportLink } from "@/components/reports/report-link";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TH, TD, TR } from "@/components/ui/table";
-import { formatDate, formatMetricValueEur } from "@/lib/format";
+import { formatDate, formatEur, formatNative } from "@/lib/format";
 import { query } from "@/lib/db";
 import type { MetricValueRow } from "@/lib/types";
 
@@ -61,18 +70,6 @@ const METRICS_MATRIX_CODES = [
   "marketing_pct_revenue",
 ];
 
-const SECTION_LABEL: Record<string, string> = {
-  executive_summary: "Executive summary",
-  company_insights_interpretation: "Insights & interpretation",
-  market_deep_dive: "Market deep-dive",
-  affiliate_benchmarking: "Affiliate benchmarking",
-  forecast_strategy: "Forecast & strategy",
-  investment_view: "Investment view",
-  valuation_downside: "Valuation — downside",
-  valuation_base: "Valuation — base",
-  valuation_upside: "Valuation — upside",
-};
-
 function panelKindFor(codes: string[]): PanelKind {
   if (codes.includes("operator")) return "operator";
   if (codes.includes("affiliate")) return "affiliate";
@@ -80,13 +77,13 @@ function panelKindFor(codes: string[]): PanelKind {
   if (codes.includes("b2b_supplier")) return "b2b_supplier";
   if (codes.includes("lottery")) return "lottery";
   if (codes.includes("dfs")) return "dfs";
-  return "operator"; // default
+  return "operator";
 }
 
-function typeChipFor(kind: PanelKind): string {
+function typeChipLabel(kind: PanelKind): string {
   switch (kind) {
     case "operator":
-      return "B2C OPERATOR";
+      return "OPERATOR";
     case "affiliate":
       return "AFFILIATE";
     case "b2b_platform":
@@ -126,6 +123,7 @@ export default async function CompanyDetailPage({
     reports,
     narratives,
     primaryMarketRow,
+    marketsForEntity,
   ] = await Promise.all([
     getScorecardSeries({ entityId: company.id, metricCodes: scorecardCodes }),
     listPopulatedPeriods(),
@@ -138,16 +136,23 @@ export default async function CompanyDetailPage({
        WHERE mv.entity_id = $1 AND mv.market_id IS NOT NULL
        GROUP BY mv.market_id, mk.slug, mk.name
        ORDER BY vals DESC
-       LIMIT 1`,
+       LIMIT 5`,
+      [company.id],
+    ),
+    query<{ market_id: string; slug: string; name: string }>(
+      `SELECT DISTINCT mv.market_id, mk.slug, mk.name
+       FROM metric_values mv
+       JOIN markets mk ON mk.id = mv.market_id
+       WHERE mv.entity_id = $1 AND mv.market_id IS NOT NULL`,
       [company.id],
     ),
   ]);
 
   const periodGroups = groupPeriodsForSelector(populatedPeriods);
+  const primaryMarket = primaryMarketRow[0] ?? null;
+  const primaryMarketsList = primaryMarketRow.map((m) => m.name);
 
-  // Recent periods that THIS entity actually has values in. Mixing global
-  // recentness with entity-relevance avoids the trap where the entity's most
-  // recent reporting period (e.g. Q3-25) gets pushed out by global FY-27 noise.
+  // Recent periods this entity actually reports in
   const entityPeriodRows = await query<{
     code: string;
     display_name: string | null;
@@ -165,9 +170,7 @@ export default async function CompanyDetailPage({
     [company.id],
   );
   const recentPeriods = entityPeriodRows;
-  const primaryMarket = primaryMarketRow[0] ?? null;
 
-  // Beacon lookup for scorecard tiles
   const allBeaconIds: string[] = [];
   byCode.forEach((rows) => {
     for (const r of rows) {
@@ -181,7 +184,113 @@ export default async function CompanyDetailPage({
   const beacon = await getBeaconEstimatesForValues(allBeaconIds);
   const tiles = buildPanelTiles(kind, byCode, beacon);
 
-  // Time matrices
+  // CD5: Revenue chart — quarterly, last 12 periods, solid blue for
+  // disclosed + dotted amber for Beacon™. Prefer quarter-bucket periods.
+  const revRows = byCode.get("revenue") ?? [];
+  const sortedRev = [...revRows].sort((a, b) =>
+    a.period_start.localeCompare(b.period_start),
+  );
+  const chartRows = sortedRev.slice(-12);
+  const chartData: TimeseriesPoint[] = chartRows.map((r) => ({
+    period: r.period_code,
+    period_start: r.period_start,
+    Revenue:
+      r.metric_unit_type === "currency"
+        ? nativeToEur(r.value_numeric, r.unit_multiplier, r.eur_rate)
+        : toRawNumeric(r.value_numeric, r.unit_multiplier),
+  }));
+  const beaconFlags: BeaconFlags = {
+    Revenue: new Set(
+      chartRows
+        .filter(
+          (r) =>
+            r.disclosure_status === "beacon_estimate" ||
+            r.disclosure_status === "derived",
+        )
+        .map((r) => r.period_code),
+    ),
+  };
+
+  // CD6: Quarterly breakdown table — assembles columns from scorecard byCode
+  // Period · Revenue · YoY · QoQ · EBITDA Margin · Active Users · Source · Confidence
+  const qPeriods = sortedRev.slice(-6); // six most recent
+  const quarterlyRows = qPeriods.map((pRow, idx) => {
+    const prevYear = sortedRev.find((r) => {
+      const d = new Date(r.period_start).getTime();
+      const cur = new Date(pRow.period_start).getTime();
+      return (
+        Math.abs(d - (cur - 365 * 86400 * 1000)) <
+        45 * 86400 * 1000
+      );
+    });
+    const prevQ = idx > 0 ? qPeriods[idx - 1] : null;
+
+    const revEur =
+      pRow.metric_unit_type === "currency"
+        ? nativeToEur(pRow.value_numeric, pRow.unit_multiplier, pRow.eur_rate)
+        : null;
+    const prevYrEur =
+      prevYear && prevYear.metric_unit_type === "currency"
+        ? nativeToEur(
+            prevYear.value_numeric,
+            prevYear.unit_multiplier,
+            prevYear.eur_rate,
+          )
+        : null;
+    const prevQEur =
+      prevQ && prevQ.metric_unit_type === "currency"
+        ? nativeToEur(prevQ.value_numeric, prevQ.unit_multiplier, prevQ.eur_rate)
+        : null;
+
+    const yoy =
+      revEur != null && prevYrEur != null && prevYrEur !== 0
+        ? ((revEur - prevYrEur) / Math.abs(prevYrEur)) * 100
+        : null;
+    const qoq =
+      revEur != null && prevQEur != null && prevQEur !== 0
+        ? ((revEur - prevQEur) / Math.abs(prevQEur)) * 100
+        : null;
+
+    const marginRow = (byCode.get("ebitda_margin") ?? []).find(
+      (r) => r.period_code === pRow.period_code,
+    );
+    const actUsersRow = (byCode.get("active_customers") ?? []).find(
+      (r) => r.period_code === pRow.period_code,
+    );
+    const margin =
+      marginRow?.value_numeric != null ? Number(marginRow.value_numeric) : null;
+    const actUsers =
+      actUsersRow != null
+        ? toRawNumeric(actUsersRow.value_numeric, actUsersRow.unit_multiplier)
+        : null;
+
+    const isBeacon =
+      pRow.disclosure_status === "beacon_estimate" ||
+      pRow.disclosure_status === "derived";
+    return {
+      periodCode: pRow.period_display_name ?? pRow.period_code,
+      revDisplay:
+        revEur != null
+          ? formatEur(revEur)
+          : pRow.value_numeric != null
+          ? formatNative(Number(pRow.value_numeric), pRow.currency ?? "EUR")
+          : "—",
+      yoy,
+      qoq,
+      margin: margin != null ? `${margin.toFixed(1)}%` : "—",
+      actUsers: actUsers != null ? abbreviate(actUsers) : "—",
+      source: pRow.source_type,
+      confidence:
+        pRow.confidence_score != null
+          ? `${(Number(pRow.confidence_score) * 100).toFixed(0)}%`
+          : isBeacon
+          ? "Modeled"
+          : "Verified",
+      isBeacon,
+    };
+  });
+
+  // Time matrices (kept from prior version) — geographic breakdown + metrics
   const periodCodes = recentPeriods.map((p) => p.code);
   const periodLabels = Object.fromEntries(
     recentPeriods.map((p) => [p.code, p.display_name ?? p.code]),
@@ -190,7 +299,6 @@ export default async function CompanyDetailPage({
     .sort((a, b) => a.start_date.localeCompare(b.start_date))
     .map((p) => p.code);
 
-  // Geographic time matrix — rows = markets where company has data, col = periods
   const geoRaw = await query<
     MetricValueRow & {
       market_name: string;
@@ -224,7 +332,6 @@ export default async function CompanyDetailPage({
     [company.id, GEO_METRIC_CODES, periodCodes],
   );
 
-  // Take the single best geographic metric (highest row count)
   const geoByMetric = new Map<string, typeof geoRaw>();
   for (const r of geoRaw) {
     if (!geoByMetric.has(r.metric_code)) geoByMetric.set(r.metric_code, []);
@@ -253,15 +360,20 @@ export default async function CompanyDetailPage({
           cells: {},
         });
       }
-      const fmt = formatMetricValueEur(r, r.eur_rate);
       const native = r.value_numeric != null ? Number(r.value_numeric) : null;
       const sortVal =
         r.metric_unit_type === "currency" && native != null && r.eur_rate
           ? native / Number(r.eur_rate)
           : native;
+      const display =
+        r.metric_unit_type === "currency" && native != null && r.eur_rate
+          ? formatEur(native / Number(r.eur_rate))
+          : native != null
+          ? abbreviate(native)
+          : "—";
       geoMarketIds.get(r.market_id)!.cells[r.period_code] = {
         value: sortVal,
-        valueFormatted: fmt.display,
+        valueFormatted: display,
         disclosureStatus: r.disclosure_status,
         source: r.source_type,
       };
@@ -278,63 +390,7 @@ export default async function CompanyDetailPage({
   const geoMetricLabel =
     topGeoCode && geoByMetric.get(topGeoCode)?.[0]?.metric_display_name;
 
-  // Metrics time matrix — rows = metrics, periods = columns (single dim = entity, no market scope)
-  const metRaw = await query<MetricValueRow & { eur_rate: string | null }>(
-    `SELECT mvc.metric_value_id, mvc.entity_id, mvc.market_id, mvc.metric_id,
-            m.code AS metric_code, m.display_name AS metric_display_name,
-            m.unit_type AS metric_unit_type,
-            mvc.period_id, p.code AS period_code, p.display_name AS period_display_name,
-            p.start_date AS period_start, p.end_date AS period_end,
-            mvc.report_id, mvc.source_type, mvc.value_numeric, mvc.value_text,
-            mvc.currency, mvc.unit_multiplier, mvc.disclosure_status,
-            mvc.confidence_score, mvc.published_timestamp,
-            fx.eur_rate::text AS eur_rate
-     FROM metric_value_canonical mvc
-     JOIN metrics m ON m.id = mvc.metric_id
-     JOIN periods p ON p.id = mvc.period_id
-     LEFT JOIN LATERAL (
-       SELECT f.eur_rate FROM fx_rates f
-       WHERE f.currency_code = COALESCE(UPPER(mvc.currency), 'EUR')
-         AND f.rate_date <= p.end_date
-       ORDER BY f.rate_date DESC LIMIT 1
-     ) fx ON true
-     WHERE mvc.entity_id = $1 AND mvc.market_id IS NULL
-       AND m.code = ANY($2::text[])
-       AND p.code = ANY($3::text[])`,
-    [company.id, METRICS_MATRIX_CODES, periodCodes],
-  );
-  const metByMetric = new Map<string, typeof metRaw>();
-  for (const r of metRaw) {
-    if (!metByMetric.has(r.metric_code)) metByMetric.set(r.metric_code, []);
-    metByMetric.get(r.metric_code)!.push(r);
-  }
-  const metRows: TimeMatrixRow[] = [];
-  for (const code of METRICS_MATRIX_CODES) {
-    const rs = metByMetric.get(code);
-    if (!rs || rs.length === 0) continue;
-    const cells: Record<string, TimeMatrixCell | null> = {};
-    for (const r of rs) {
-      const fmt = formatMetricValueEur(r, r.eur_rate);
-      const native = r.value_numeric != null ? Number(r.value_numeric) : null;
-      const sortVal =
-        r.metric_unit_type === "currency" && native != null && r.eur_rate
-          ? native / Number(r.eur_rate)
-          : native;
-      cells[r.period_code] = {
-        value: sortVal,
-        valueFormatted: fmt.display,
-        disclosureStatus: r.disclosure_status,
-        source: r.source_type,
-      };
-    }
-    metRows.push({
-      id: code,
-      name: rs[0].metric_display_name,
-      cells,
-    });
-  }
-
-  // Competitive position: peers in the primary market, same entity type, ranked by best-coverage metric
+  // Competitive position — operators only, in their primary market
   let peersLb: ReturnType<typeof adaptEntityLeaderboardRows> | null = null;
   let peersMetric: string | null = null;
   if (primaryMarket && kind === "operator") {
@@ -347,7 +403,13 @@ export default async function CompanyDetailPage({
        GROUP BY m.code ORDER BY n DESC NULLS LAST LIMIT 1`,
       [
         primaryMarket.market_id,
-        ["online_ggr", "sportsbook_ggr", "sportsbook_revenue", "casino_ggr", "revenue"],
+        [
+          "online_ggr",
+          "sportsbook_ggr",
+          "sportsbook_revenue",
+          "casino_ggr",
+          "revenue",
+        ],
       ],
     );
     peersMetric = candidate[0]?.code ?? "online_ggr";
@@ -361,54 +423,235 @@ export default async function CompanyDetailPage({
     peersLb = adaptEntityLeaderboardRows(peersRaw);
   }
 
-  const narrativesBySection = new Map<string, typeof narratives>();
-  for (const n of narratives) {
-    if (!narrativesBySection.has(n.section_code))
-      narrativesBySection.set(n.section_code, []);
-    narrativesBySection.get(n.section_code)!.push(n);
-  }
+  // Stock row (CD4) — only for entities with a ticker
+  const stockSnapshot = company.ticker
+    ? await getStockSnapshot(company.id)
+    : null;
 
-  const subtitle = [
-    primaryMarket ? `Primary market: ${primaryMarket.name}` : null,
-    company.country_of_listing
-      ? `Listed in ${company.country_of_listing}`
-      : null,
+  // Narratives — prefer forecast_strategy + investment_view for the sidebar
+  const narrBySection = new Map<string, typeof narratives>();
+  for (const n of narratives) {
+    if (!narrBySection.has(n.section_code))
+      narrBySection.set(n.section_code, []);
+    narrBySection.get(n.section_code)!.push(n);
+  }
+  const forecast = narrBySection.get("forecast_strategy")?.[0] ?? null;
+  const investment = narrBySection.get("investment_view")?.[0] ?? null;
+
+  const primaryTiles = tiles.primary.slice(0, 4);
+  const secondaryTiles = tiles.secondary.slice(0, 8);
+
+  const subtitleParts = [
     company.headquarters_country ? `HQ ${company.headquarters_country}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+    `${marketsForEntity.length} market${marketsForEntity.length === 1 ? "" : "s"}`,
+    primaryMarketsList.length > 0
+      ? `Primary: ${primaryMarketsList.slice(0, 3).join(", ")}`
+      : null,
+  ].filter(Boolean);
+
+  const headerPeriod =
+    Array.from(byCode.values())[0]?.[0]?.period_display_name ??
+    Array.from(byCode.values())[0]?.[0]?.period_code ??
+    null;
 
   return (
-    <div className="space-y-4">
-      <Scorecard
-        name={company.name}
-        typeChip={typeChipFor(kind)}
-        ticker={company.ticker}
-        exchange={company.exchange}
-        subtitle={subtitle}
-        period={
-          Array.from(byCode.values())[0]?.[0]?.period_display_name ??
-          Array.from(byCode.values())[0]?.[0]?.period_code ??
-          undefined
-        }
-        primary={tiles.primary}
-        secondary={tiles.secondary}
-        actions={
-          <div className="flex items-center gap-2">
-            <PeriodSelector groups={periodGroups} currentCode={periodCode} />
-            <Link
-              href={`/companies/compare?slugs=${company.slug}`}
-              className="rounded-md border border-tb-border px-3 py-1.5 text-xs text-tb-text hover:border-tb-blue"
-            >
-              Compare →
-            </Link>
+    <div className="space-y-3">
+      {/* CD1: header row with chips + period selector */}
+      <header className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+            <Badge variant="blue">{typeChipLabel(kind)}</Badge>
+            <Badge variant={company.ticker ? "blue" : "muted"}>
+              {company.ticker ? "LISTED" : "PRIVATE"}
+            </Badge>
+            {company.ticker && (
+              <Badge variant="blue" className="font-mono">
+                {company.exchange ? `${company.exchange}:` : ""}
+                {company.ticker}
+              </Badge>
+            )}
           </div>
-        }
-      />
+          <h1 className="truncate text-2xl font-semibold tracking-tight text-tb-text">
+            {company.name}
+          </h1>
+          {subtitleParts.length > 0 && (
+            <p className="mt-0.5 text-[11px] text-tb-muted">
+              {subtitleParts.join(" · ")}
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {headerPeriod && (
+            <div className="rounded-md border border-tb-border px-2 py-1 text-[10px] text-tb-muted">
+              <span className="uppercase tracking-wider">As of</span>{" "}
+              <span className="font-mono text-tb-text">{headerPeriod}</span>
+            </div>
+          )}
+          <span className="rounded-md border border-tb-border bg-tb-surface px-2 py-1 font-mono text-[10px] text-tb-muted">
+            € EUR
+          </span>
+          <PeriodSelector groups={periodGroups} currentCode={periodCode} />
+          <Link
+            href={`/companies/compare?slugs=${company.slug}`}
+            className="rounded-md border border-tb-border px-3 py-1.5 text-xs text-tb-text hover:border-tb-blue"
+          >
+            Compare →
+          </Link>
+        </div>
+      </header>
 
-      {/* 2-col: geographic breakdown | metrics over time */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {geoRows.length > 0 ? (
+      {/* CD2: Primary KPI scorecard — 4 large tiles */}
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-md border border-tb-border bg-tb-border sm:grid-cols-2 lg:grid-cols-4">
+        {primaryTiles.map((t) => (
+          <PrimaryKpiTile
+            key={t.code}
+            label={t.label}
+            value={t.valueFormatted}
+            yoy={t.yoy}
+            spark={t.spark}
+            beaconMask={t.beaconMask}
+            source={t.source}
+            disclosureStatus={t.disclosureStatus}
+            tooltip={t.nativeTooltip}
+          />
+        ))}
+      </div>
+
+      {/* CD3: Secondary KPI row — 8 smaller single-line tiles */}
+      {secondaryTiles.length > 0 && (
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-tb-border bg-tb-border sm:grid-cols-4 lg:grid-cols-8">
+          {secondaryTiles.map((t) => (
+            <SecondaryKpiTile
+              key={t.code}
+              label={t.label}
+              value={t.valueFormatted}
+              yoy={t.yoy}
+              beacon={
+                t.disclosureStatus === "beacon_estimate" ||
+                t.disclosureStatus === "derived"
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {/* CD4: Stock row (listed only) */}
+      {stockSnapshot && company.ticker && (
+        <StockRow
+          ticker={`${company.exchange ? `${company.exchange}:` : ""}${company.ticker}`}
+          snapshot={stockSnapshot}
+        />
+      )}
+
+      {/* CD5: Main body — two columns */}
+      <div className="grid gap-3 lg:grid-cols-5">
+        <div className="rounded-md border border-tb-border bg-tb-surface lg:col-span-3">
+          <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+            <div>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                Revenue — quarterly
+              </h3>
+              <p className="mt-0.5 text-[10px] text-tb-muted">
+                Last 12 quarters · solid = disclosed · dotted = Beacon™
+              </p>
+            </div>
+            <span className="font-mono text-[10px] text-tb-muted">EUR</span>
+          </div>
+          <div className="p-2">
+            {chartData.length > 0 ? (
+              <MetricTimeseries
+                data={chartData}
+                series={[{ key: "Revenue", label: "Revenue" }]}
+                beaconFlags={beaconFlags}
+                height={260}
+              />
+            ) : (
+              <p className="p-6 text-center text-[11px] text-tb-muted">
+                No revenue history for this entity yet.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-3 lg:col-span-2">
+          <NarrativeCard
+            title="Forecast & strategy"
+            narrative={forecast}
+          />
+          <NarrativeCard title="Investment view" narrative={investment} />
+        </div>
+      </div>
+
+      {/* CD6: Quarterly breakdown table */}
+      <div className="rounded-md border border-tb-border bg-tb-surface">
+        <div className="border-b border-tb-border px-3 py-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+            Quarterly breakdown
+          </h3>
+          <p className="mt-0.5 text-[10px] text-tb-muted">
+            Last 6 reported periods · revenue, YoY/QoQ, EBITDA margin, actives
+          </p>
+        </div>
+        <Table>
+          <THead>
+            <tr>
+              <TH>Period</TH>
+              <TH className="text-right">Revenue</TH>
+              <TH className="text-right">YoY</TH>
+              <TH className="text-right">QoQ</TH>
+              <TH className="text-right">EBITDA Margin</TH>
+              <TH className="text-right">Active Users</TH>
+              <TH>Source</TH>
+              <TH className="text-right">Confidence</TH>
+            </tr>
+          </THead>
+          <TBody>
+            {quarterlyRows.length === 0 && (
+              <TR>
+                <TD colSpan={8} className="py-6 text-center text-tb-muted">
+                  No quarterly revenue history.
+                </TD>
+              </TR>
+            )}
+            {quarterlyRows.map((r, i) => (
+              <TR
+                key={i}
+                className={
+                  r.isBeacon
+                    ? "border-l-2 border-l-tb-beacon bg-tb-beacon/5"
+                    : ""
+                }
+              >
+                <TD className="font-mono text-[11px] text-tb-text">
+                  {r.periodCode}
+                </TD>
+                <TD className="text-right font-mono text-tb-text">
+                  {r.revDisplay}
+                  {r.isBeacon && <sup className="beacon-tm">™</sup>}
+                </TD>
+                <TD className="text-right">
+                  <DeltaChip pct={r.yoy} size="xs" />
+                </TD>
+                <TD className="text-right">
+                  <DeltaChip pct={r.qoq} size="xs" />
+                </TD>
+                <TD className="text-right font-mono">{r.margin}</TD>
+                <TD className="text-right font-mono">{r.actUsers}</TD>
+                <TD>
+                  <SourceLabel source={r.source} />
+                </TD>
+                <TD className="text-right font-mono text-[10px] text-tb-muted">
+                  {r.confidence}
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      </div>
+
+      {/* Geographic breakdown + metrics matrix */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        {geoRows.length > 0 && (
           <TimeMatrix
             title={`Geographic breakdown${geoMetricLabel ? ` — ${geoMetricLabel}` : ""}`}
             periods={orderedPeriods}
@@ -416,131 +659,429 @@ export default async function CompanyDetailPage({
             rows={geoRows}
             csvFilename={`${company.slug}-geo.csv`}
           />
-        ) : (
-          <div className="rounded-md border border-tb-border bg-tb-surface p-6 text-[11px] text-tb-muted">
-            No per-market breakdown data yet.
-          </div>
         )}
-        {metRows.length > 0 ? (
-          <TimeMatrix
-            title="Metrics over time"
-            periods={orderedPeriods}
-            periodLabels={periodLabels}
-            rows={metRows}
-            csvFilename={`${company.slug}-metrics.csv`}
+        {/* Competitive position */}
+        {peersLb && peersLb.rows.length > 0 && primaryMarket && (
+          <Leaderboard
+            title={`Competitive position — ${primaryMarket.name}`}
+            subtitle={`${company.name} vs peers · ${(peersMetric ?? "revenue").replace(/_/g, " ")}`}
+            valueLabel={(peersMetric ?? "revenue").toUpperCase()}
+            rows={peersLb.rows}
+            total={peersLb.total}
+            columns={["rank", "name", "value", "share", "yoy", "sparkline"]}
+            maxRows={10}
           />
-        ) : (
-          <div className="rounded-md border border-tb-border bg-tb-surface p-6 text-[11px] text-tb-muted">
-            No entity-level time series yet.
-          </div>
         )}
       </div>
 
-      {/* Competitive position */}
-      {peersLb && peersLb.rows.length > 0 && primaryMarket && (
-        <Leaderboard
-          title={`Competitive position — ${primaryMarket.name}`}
-          subtitle={`${company.name} vs peers ranked by ${(peersMetric ?? "revenue").replace(/_/g, " ")}`}
-          valueLabel={(peersMetric ?? "revenue").toUpperCase()}
-          rows={peersLb.rows}
-          total={peersLb.total}
-          columns={["rank", "name", "value", "share", "yoy", "sparkline", "ticker"]}
-          maxRows={10}
-        />
-      )}
-
-      {/* Narratives */}
-      {narratives.length > 0 && (
-        <div className="rounded-md border border-tb-border bg-tb-surface">
-          <div className="border-b border-tb-border px-3 py-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-              Narratives ({narratives.length})
-            </h3>
-          </div>
-          <div className="space-y-3 p-3">
-            {Array.from(narrativesBySection.entries()).map(([section, ns]) => (
-              <details
-                key={section}
-                open
-                className="group rounded-md border border-tb-border bg-tb-bg"
-              >
-                <summary className="flex cursor-pointer items-center justify-between border-b border-tb-border px-3 py-2 text-[10px] uppercase tracking-wider text-tb-muted group-open:text-tb-text">
-                  <span>{SECTION_LABEL[section] ?? section}</span>
-                  <span className="font-mono">{ns.length}</span>
-                </summary>
-                <div className="space-y-3 p-3">
-                  {ns.slice(0, 3).map((n) => (
-                    <div
-                      key={n.id}
-                      className="border-l-2 border-tb-border pl-3 text-[11px] leading-relaxed text-tb-text"
-                    >
-                      {n.content.length > 480
-                        ? n.content.slice(0, 480) + "…"
-                        : n.content}
-                      <div className="mt-1 text-[10px] text-tb-muted">
-                        <ReportLink
-                          reportId={n.report_id}
-                          className="hover:text-tb-blue"
-                        >
-                          → view source
-                        </ReportLink>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Source reports */}
+      {/* CD7: Source reports strip */}
       <div className="rounded-md border border-tb-border bg-tb-surface">
         <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
             Source reports ({reports.length})
           </h3>
+          <Link
+            href={`/reports?q=${encodeURIComponent(company.name)}`}
+            className="text-[10px] text-tb-blue hover:underline"
+          >
+            All reports →
+          </Link>
         </div>
         {reports.length === 0 ? (
           <p className="p-4 text-[11px] text-tb-muted">
             No reports reference this company yet.
           </p>
         ) : (
-          <Table>
-            <THead>
-              <tr>
-                <TH>Filename</TH>
-                <TH>Type</TH>
-                <TH>Published</TH>
-                <TH className="text-right">Metrics</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {reports.slice(0, 15).map((r) => (
-                <TR key={r.id}>
-                  <TD>
-                    <ReportLink
-                      reportId={r.id}
-                      className="text-tb-text hover:text-tb-blue"
-                    >
-                      {r.filename}
-                    </ReportLink>
-                  </TD>
-                  <TD>
-                    <Badge variant="muted">{r.document_type}</Badge>
-                  </TD>
-                  <TD className="font-mono text-tb-muted">
-                    {formatDate(r.published_timestamp)}
-                  </TD>
-                  <TD className="text-right font-mono">
-                    {r.metric_count ?? "—"}
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
+          <div className="flex flex-wrap gap-2 px-3 py-2">
+            {reports.slice(0, 12).map((r) => (
+              <ReportLink
+                key={r.id}
+                reportId={r.id}
+                className="inline-flex items-center gap-1.5 rounded border border-tb-border bg-tb-bg px-2 py-1 font-mono text-[10px] text-tb-text hover:border-tb-blue hover:text-tb-blue"
+              >
+                <span className="h-3 w-3 shrink-0 rounded-sm bg-tb-border" />
+                <span className="truncate">{r.filename}</span>
+                <span className="text-tb-muted">
+                  {formatDate(r.published_timestamp)}
+                </span>
+              </ReportLink>
+            ))}
+          </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ——— Helpers ——————————————————————————————————————————————————————
+
+function abbreviate(v: number): string {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}${abs.toFixed(0)}`;
+}
+
+function PrimaryKpiTile({
+  label,
+  value,
+  yoy,
+  spark,
+  beaconMask,
+  source,
+  disclosureStatus,
+  tooltip,
+}: {
+  label: string;
+  value: string | null;
+  yoy: number | null | undefined;
+  spark?: (number | null)[];
+  beaconMask?: boolean[];
+  source?: import("@/lib/types").SourceType | null;
+  disclosureStatus?: import("@/lib/types").DisclosureStatus;
+  tooltip?: string | null;
+}) {
+  const isBeacon =
+    disclosureStatus === "beacon_estimate" || disclosureStatus === "derived";
+  return (
+    <div
+      className={
+        "flex flex-col justify-between gap-1 bg-tb-surface px-4 py-3 " +
+        (isBeacon ? "border-l-2 border-l-tb-beacon" : "")
+      }
+    >
+      <span className="text-[10px] uppercase tracking-wider text-tb-muted">
+        {label}
+      </span>
+      <div className="flex items-baseline gap-1.5" title={tooltip ?? undefined}>
+        <span
+          className={
+            "font-mono text-2xl font-semibold " +
+            (value ? "text-tb-text" : "text-tb-muted")
+          }
+        >
+          {value ?? "—"}
+        </span>
+        {isBeacon && value && <sup className="beacon-tm">™</sup>}
+      </div>
+      <div className="flex items-center justify-between">
+        <DeltaChip pct={yoy ?? null} />
+        {spark && spark.length >= 2 && (
+          <Sparkline
+            values={spark}
+            beaconMask={beaconMask}
+            width={60}
+            height={16}
+          />
+        )}
+      </div>
+      {source && (
+        <div>
+          <SourceLabel source={source} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SecondaryKpiTile({
+  label,
+  value,
+  yoy,
+  beacon,
+}: {
+  label: string;
+  value: string | null;
+  yoy: number | null | undefined;
+  beacon: boolean;
+}) {
+  return (
+    <div
+      className={
+        "flex flex-col justify-between gap-0.5 bg-tb-surface px-3 py-2 " +
+        (beacon ? "border-l-2 border-l-tb-beacon" : "")
+      }
+    >
+      <span className="truncate text-[9px] uppercase tracking-wider text-tb-muted">
+        {label}
+      </span>
+      <span className="truncate font-mono text-sm font-semibold text-tb-text">
+        {value ?? "—"}
+        {beacon && value && <sup className="beacon-tm text-[8px]">™</sup>}
+      </span>
+      <DeltaChip pct={yoy ?? null} size="xs" />
+    </div>
+  );
+}
+
+interface StockSnap {
+  latest_price: number | null;
+  prev_price: number | null;
+  day_change_pct: number | null;
+  day_change_abs: number | null;
+  market_cap_eur: number | null;
+  ev_ebitda: number | null;
+  pe_ratio: number | null;
+  currency: string | null;
+  history: { period_code: string; value: number | null }[];
+}
+
+async function getStockSnapshot(entityId: string): Promise<StockSnap> {
+  const [priceRows, marketCapRow, evmRow, peRow] = await Promise.all([
+    query<{
+      period_code: string;
+      value: string | null;
+      currency: string | null;
+      start_date: string;
+    }>(
+      `SELECT p.code AS period_code, mv.value_numeric::text AS value,
+              mv.currency, p.start_date::text
+       FROM metric_values mv
+       JOIN metrics m ON m.id = mv.metric_id
+       JOIN periods p ON p.id = mv.period_id
+       WHERE m.code = 'stock_price' AND mv.entity_id = $1
+         AND mv.value_numeric IS NOT NULL
+       ORDER BY p.start_date DESC
+       LIMIT 60`,
+      [entityId],
+    ),
+    query<{
+      value: string | null;
+      currency: string | null;
+      unit_multiplier: string | null;
+      eur_rate: string | null;
+    }>(
+      `SELECT mv.value_numeric::text AS value, mv.currency, mv.unit_multiplier,
+              fx.eur_rate::text AS eur_rate
+       FROM metric_values mv
+       JOIN metrics m ON m.id = mv.metric_id
+       JOIN periods p ON p.id = mv.period_id
+       LEFT JOIN LATERAL (
+         SELECT f.eur_rate FROM fx_rates f
+         WHERE f.currency_code = COALESCE(UPPER(mv.currency), 'EUR')
+           AND f.rate_date <= p.end_date
+         ORDER BY f.rate_date DESC LIMIT 1
+       ) fx ON true
+       WHERE m.code = 'market_cap' AND mv.entity_id = $1
+         AND mv.value_numeric IS NOT NULL
+       ORDER BY p.start_date DESC
+       LIMIT 1`,
+      [entityId],
+    ),
+    query<{ value: string | null }>(
+      `SELECT mv.value_numeric::text AS value
+       FROM metric_values mv
+       JOIN metrics m ON m.id = mv.metric_id
+       JOIN periods p ON p.id = mv.period_id
+       WHERE m.code = 'ev_ebitda_multiple' AND mv.entity_id = $1
+         AND mv.value_numeric IS NOT NULL
+       ORDER BY p.start_date DESC LIMIT 1`,
+      [entityId],
+    ),
+    query<{ value: string | null }>(
+      `SELECT mv.value_numeric::text AS value
+       FROM metric_values mv
+       JOIN metrics m ON m.id = mv.metric_id
+       JOIN periods p ON p.id = mv.period_id
+       WHERE m.code = 'pe_ratio' AND mv.entity_id = $1
+         AND mv.value_numeric IS NOT NULL
+       ORDER BY p.start_date DESC LIMIT 1`,
+      [entityId],
+    ),
+  ]);
+
+  const latest = priceRows[0] ? Number(priceRows[0].value) : null;
+  const prev = priceRows[1] ? Number(priceRows[1].value) : null;
+  const dcp =
+    latest != null && prev != null && prev !== 0
+      ? ((latest - prev) / prev) * 100
+      : null;
+  const dchange = latest != null && prev != null ? latest - prev : null;
+  const mc = marketCapRow[0];
+  const mcRaw = mc?.value != null ? Number(mc.value) : null;
+  const scale =
+    mc?.unit_multiplier === "billions"
+      ? 1_000_000_000
+      : mc?.unit_multiplier === "millions"
+      ? 1_000_000
+      : mc?.unit_multiplier === "thousands"
+      ? 1_000
+      : 1;
+  const mcNative = mcRaw != null ? mcRaw * scale : null;
+  const mcEur =
+    mcNative != null && mc?.eur_rate && Number(mc.eur_rate) > 0
+      ? mcNative / Number(mc.eur_rate)
+      : mcNative;
+
+  const history = priceRows
+    .slice(0, 30)
+    .reverse()
+    .map((r) => ({
+      period_code: r.period_code,
+      value: r.value != null ? Number(r.value) : null,
+    }));
+
+  return {
+    latest_price: latest,
+    prev_price: prev,
+    day_change_pct: dcp,
+    day_change_abs: dchange,
+    market_cap_eur: mcEur,
+    ev_ebitda: evmRow[0]?.value != null ? Number(evmRow[0].value) : null,
+    pe_ratio: peRow[0]?.value != null ? Number(peRow[0].value) : null,
+    currency: priceRows[0]?.currency ?? null,
+  history,
+  };
+}
+
+function StockRow({
+  ticker,
+  snapshot,
+}: {
+  ticker: string;
+  snapshot: StockSnap;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-md border border-tb-border bg-tb-border md:grid-cols-3">
+      {/* Left — ticker + price + day change */}
+      <div className="flex items-center gap-3 bg-tb-surface px-4 py-3">
+        <div className="flex-1">
+          <div className="font-mono text-[11px] text-tb-muted">{ticker}</div>
+          <div className="flex items-baseline gap-2">
+            <span className="font-mono text-xl font-semibold text-tb-text">
+              {snapshot.latest_price != null
+                ? snapshot.currency
+                  ? formatNative(snapshot.latest_price, snapshot.currency)
+                  : snapshot.latest_price.toFixed(2)
+                : "—"}
+            </span>
+            {snapshot.day_change_abs != null && snapshot.currency && (
+              <span
+                className={
+                  "font-mono text-[11px] " +
+                  (snapshot.day_change_abs > 0
+                    ? "text-tb-success"
+                    : snapshot.day_change_abs < 0
+                    ? "text-tb-danger"
+                    : "text-tb-muted")
+                }
+              >
+                {snapshot.day_change_abs > 0 ? "+" : ""}
+                {formatNative(snapshot.day_change_abs, snapshot.currency)}
+              </span>
+            )}
+            <DeltaChip pct={snapshot.day_change_pct} size="xs" />
+          </div>
+          <div className="mt-1 text-[9px] uppercase tracking-wider text-tb-muted">
+            Today
+          </div>
+        </div>
+      </div>
+
+      {/* Center — 30d sparkline */}
+      <div className="flex flex-col justify-center gap-1 bg-tb-surface px-4 py-3">
+        <div className="text-[9px] uppercase tracking-wider text-tb-muted">
+          30-day
+        </div>
+        {snapshot.history.length >= 2 ? (
+          <Sparkline
+            values={snapshot.history.map((h) => h.value)}
+            width={220}
+            height={40}
+          />
+        ) : (
+          <span className="font-mono text-[10px] text-tb-muted">
+            Insufficient history
+          </span>
+        )}
+      </div>
+
+      {/* Right — multiples */}
+      <div className="grid grid-cols-3 gap-px bg-tb-border">
+        <MiniStat
+          label="Market cap"
+          value={
+            snapshot.market_cap_eur != null
+              ? formatEur(snapshot.market_cap_eur)
+              : "—"
+          }
+        />
+        <MiniStat
+          label="EV / EBITDA"
+          value={
+            snapshot.ev_ebitda != null
+              ? `${snapshot.ev_ebitda.toFixed(1)}×`
+              : "—"
+          }
+        />
+        <MiniStat
+          label="P / E"
+          value={
+            snapshot.pe_ratio != null
+              ? `${snapshot.pe_ratio.toFixed(1)}`
+              : "—"
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col justify-center gap-0.5 bg-tb-surface px-3 py-3">
+      <span className="text-[9px] uppercase tracking-wider text-tb-muted">
+        {label}
+      </span>
+      <span className="font-mono text-sm font-semibold text-tb-text">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function NarrativeCard({
+  title,
+  narrative,
+}: {
+  title: string;
+  narrative:
+    | {
+        id: string;
+        report_id: string;
+        content: string;
+      }
+    | null
+    | undefined;
+}) {
+  return (
+    <div className="rounded-md border border-tb-border bg-tb-surface">
+      <div className="border-b border-tb-border px-3 py-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+          {title}
+        </h3>
+      </div>
+      {narrative ? (
+        <div className="p-3">
+          <p className="text-[11px] leading-relaxed text-tb-text">
+            {narrative.content.length > 560
+              ? narrative.content.slice(0, 560) + "…"
+              : narrative.content}
+          </p>
+          <ReportLink
+            reportId={narrative.report_id}
+            className="mt-2 inline-block text-[10px] text-tb-blue hover:underline"
+          >
+            → source report
+          </ReportLink>
+        </div>
+      ) : (
+        <p className="p-3 text-[11px] text-tb-muted">
+          No {title.toLowerCase()} excerpt for this entity yet.
+        </p>
+      )}
     </div>
   );
 }

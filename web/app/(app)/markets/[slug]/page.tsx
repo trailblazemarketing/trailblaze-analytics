@@ -131,7 +131,7 @@ export default async function MarketDetailPage({
     tmPeriods.map((p) => [p.code, p.display_name ?? p.code]),
   );
 
-  const [byCode, reports, taxHistory, operatorsRaw, narratives, tmRowsRaw] =
+  const [byCode, reports, taxHistory, operatorsRaw, narratives, tmRowsRaw, regulatoryFilings] =
     await Promise.all([
       getScorecardSeries({ marketId: market.id, metricCodes: scorecardCodes }),
       getMarketReports(market.id, 25),
@@ -182,6 +182,24 @@ export default async function MarketDetailPage({
            AND m.code = ANY($2::text[])
            AND p.code = ANY($3::text[])`,
         [market.id, TIME_MATRIX_METRICS, periodCodes],
+      ),
+      // MD2: Regulatory filings — reports with a regulator-linked source that
+      // reference this market, newest first. Small list module in the right
+      // column alongside tax history.
+      query<{
+        id: string;
+        filename: string;
+        document_type: string;
+        published_timestamp: string | null;
+      }>(
+        `SELECT DISTINCT r.id, r.filename, r.document_type, r.published_timestamp
+         FROM reports r
+         JOIN report_markets rm ON rm.report_id = r.id
+         WHERE rm.market_id = $1
+           AND r.document_type IN ('regulatory_update','market_update')
+         ORDER BY r.published_timestamp DESC NULLS LAST
+         LIMIT 10`,
+        [market.id],
       ),
     ]);
 
@@ -264,7 +282,7 @@ export default async function MarketDetailPage({
     undefined;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <Scorecard
         name={market.name}
         typeChip={market.market_type}
@@ -285,8 +303,8 @@ export default async function MarketDetailPage({
         }
       />
 
-      {/* 2-col: operators in market | time matrix */}
-      <div className="grid gap-4 lg:grid-cols-2">
+      {/* 2-col: operators in market (cap 15, MD1) | time matrix */}
+      <div className="grid gap-3 lg:grid-cols-2">
         <Leaderboard
           title={`Operators in ${market.name}`}
           subtitle={`Ranked by latest ${operatorMetric.replace(/_/g, " ")}`}
@@ -294,7 +312,7 @@ export default async function MarketDetailPage({
           rows={operators.rows}
           total={operators.total}
           columns={["rank", "name", "value", "share", "yoy", "sparkline"]}
-          maxRows={20}
+          maxRows={15}
           showViewAll
           viewAllHref={`/companies?market=${market.slug}`}
         />
@@ -307,6 +325,92 @@ export default async function MarketDetailPage({
           csvFilename={`${market.slug}-metrics.csv`}
           valueLabel="€"
         />
+      </div>
+
+      {/* MD2: Regulatory filings — compact list in side panel alongside
+          tax history so market page carries the full regulator story */}
+      <div className="grid gap-3 lg:grid-cols-3">
+        {regulatoryFilings.length > 0 ? (
+          <div className="rounded-md border border-tb-border bg-tb-surface">
+            <div className="border-b border-tb-border px-3 py-2">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                Regulatory filings
+              </h3>
+              <p className="mt-0.5 text-[10px] text-tb-muted">
+                Regulator-linked reports, newest first
+              </p>
+            </div>
+            <ul className="divide-y divide-tb-border/60">
+              {regulatoryFilings.map((f) => (
+                <li key={f.id} className="px-3 py-1.5">
+                  <ReportLink
+                    reportId={f.id}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="inline-flex min-w-0 items-center gap-2">
+                      <span className="h-3 w-3 shrink-0 rounded-sm bg-tb-border" />
+                      <span className="truncate text-[11px] text-tb-text hover:text-tb-blue">
+                        {f.filename}
+                      </span>
+                    </span>
+                    <span className="shrink-0 font-mono text-[9px] text-tb-muted">
+                      {formatDate(f.published_timestamp)}
+                    </span>
+                  </ReportLink>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="rounded-md border border-tb-border bg-tb-surface p-4 text-[11px] text-tb-muted">
+            No regulatory filings indexed for this market.
+          </div>
+        )}
+
+        {/* Tax history — moved here to pair visually with the filings list */}
+        {taxHistory.length > 0 ? (
+          <div className="rounded-md border border-tb-border bg-tb-surface lg:col-span-2">
+            <div className="border-b border-tb-border px-3 py-2">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                Regulatory activity — tax history
+              </h3>
+            </div>
+            <Table>
+              <THead>
+                <tr>
+                  <TH>Vertical</TH>
+                  <TH>Rate</TH>
+                  <TH>Basis</TH>
+                  <TH>From</TH>
+                  <TH>To</TH>
+                  <TH>Notes</TH>
+                </tr>
+              </THead>
+              <TBody>
+                {taxHistory.map((t) => (
+                  <TR key={t.id}>
+                    <TD>
+                      <Badge variant="muted">{t.vertical ?? "all"}</Badge>
+                    </TD>
+                    <TD className="font-mono">
+                      {Number(t.tax_rate).toFixed(2)}%
+                    </TD>
+                    <TD className="text-tb-muted">{t.tax_basis ?? "—"}</TD>
+                    <TD className="font-mono text-tb-muted">
+                      {formatDate(t.effective_from)}
+                    </TD>
+                    <TD className="font-mono text-tb-muted">
+                      {t.effective_to ? formatDate(t.effective_to) : "current"}
+                    </TD>
+                    <TD className="text-tb-muted">{t.notes ?? "—"}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </div>
+        ) : (
+          <div className="lg:col-span-2" />
+        )}
       </div>
 
       {/* Narratives */}
@@ -405,48 +509,6 @@ export default async function MarketDetailPage({
         )}
       </div>
 
-      {/* Regulatory activity */}
-      {taxHistory.length > 0 && (
-        <div className="rounded-md border border-tb-border bg-tb-surface">
-          <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-              Regulatory activity — tax history
-            </h3>
-          </div>
-          <Table>
-            <THead>
-              <tr>
-                <TH>Vertical</TH>
-                <TH>Rate</TH>
-                <TH>Basis</TH>
-                <TH>From</TH>
-                <TH>To</TH>
-                <TH>Notes</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {taxHistory.map((t) => (
-                <TR key={t.id}>
-                  <TD>
-                    <Badge variant="muted">{t.vertical ?? "all"}</Badge>
-                  </TD>
-                  <TD className="font-mono">
-                    {Number(t.tax_rate).toFixed(2)}%
-                  </TD>
-                  <TD className="text-tb-muted">{t.tax_basis ?? "—"}</TD>
-                  <TD className="font-mono text-tb-muted">
-                    {formatDate(t.effective_from)}
-                  </TD>
-                  <TD className="font-mono text-tb-muted">
-                    {t.effective_to ? formatDate(t.effective_to) : "current"}
-                  </TD>
-                  <TD className="text-tb-muted">{t.notes ?? "—"}</TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        </div>
-      )}
     </div>
   );
 }
