@@ -136,6 +136,7 @@ export async function getEntityLeaderboard(opts: {
   periodCode?: string | null;
   limit?: number;
   sparkLen?: number;
+  includePending?: boolean; // default false: hide auto_added_needs_review
 }): Promise<LeaderboardRowRaw[]> {
   const sparkLen = opts.sparkLen ?? 8;
 
@@ -208,6 +209,7 @@ export async function getEntityLeaderboard(opts: {
         ${marketJoin}
         ${typeFilter}
         AND mvc.entity_id IS NOT NULL
+        ${opts.includePending ? "" : "AND (e.metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')"}
     ),
     per_entity AS (
       SELECT s.*,

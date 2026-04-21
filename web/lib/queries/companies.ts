@@ -23,8 +23,14 @@ export async function listCompanies(filters: {
   entity_type?: string;
   country?: string;
   exchange?: string;
+  include_pending?: boolean; // default false: hide auto_added_needs_review
 } = {}): Promise<Entity[]> {
   const clauses: string[] = ["e.is_active = true"];
+  if (!filters.include_pending) {
+    clauses.push(
+      "(e.metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')",
+    );
+  }
   const params: unknown[] = [];
 
   if (filters.search) {
@@ -226,9 +232,15 @@ export async function getCompaniesAggregateKpis(): Promise<{
        FROM latest_rev lr
      )
      SELECT
-       (SELECT COUNT(*)::int FROM entities WHERE is_active = true) AS total,
-       (SELECT COUNT(*)::int FROM entities WHERE is_active = true AND ticker IS NOT NULL) AS listed,
-       (SELECT COUNT(*)::int FROM entities WHERE is_active = true AND ticker IS NULL) AS private_count,
+       (SELECT COUNT(*)::int FROM entities
+         WHERE is_active = true
+           AND (metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')) AS total,
+       (SELECT COUNT(*)::int FROM entities
+         WHERE is_active = true AND ticker IS NOT NULL
+           AND (metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')) AS listed,
+       (SELECT COUNT(*)::int FROM entities
+         WHERE is_active = true AND ticker IS NULL
+           AND (metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')) AS private_count,
        (SELECT SUM(rev_eur)::text FROM rev_in_eur) AS combined_rev_eur,
        (SELECT (SUM(lm.margin_pct * re.rev_eur) / NULLIF(SUM(re.rev_eur), 0))::text
           FROM latest_margin lm JOIN rev_in_eur re ON re.entity_id = lm.entity_id) AS weighted_margin`,

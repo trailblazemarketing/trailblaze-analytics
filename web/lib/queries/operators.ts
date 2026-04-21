@@ -84,6 +84,7 @@ export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
      LEFT JOIN mc_ranked mc ON mc.entity_id = e.id AND mc.rn = 1
      LEFT JOIN ev_ranked ev ON ev.entity_id = e.id AND ev.rn = 1
      WHERE et.code = 'operator' AND e.ticker IS NOT NULL AND e.is_active = true
+       AND (e.metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')
      ORDER BY e.name`,
   );
 

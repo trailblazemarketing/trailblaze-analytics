@@ -34,6 +34,7 @@ export default async function CompaniesIndexPage({
     exchange?: string;
     metric?: string;
     period?: string;
+    pending?: "true";
   };
 }) {
   const metric =
@@ -41,6 +42,7 @@ export default async function CompaniesIndexPage({
     METRIC_OPTIONS[0];
   const typeCode = searchParams.type || undefined;
   const periodCode = searchParams.period ?? null;
+  const includePending = searchParams.pending === "true";
 
   const [lbRaw, companies, typeCounts, populatedPeriods, kpis] =
     await Promise.all([
@@ -49,12 +51,14 @@ export default async function CompaniesIndexPage({
         entityTypeCode: typeCode,
         periodCode,
         limit: 120,
+        includePending,
       }),
       listCompanies({
         search: searchParams.q,
         entity_type: searchParams.type,
         country: searchParams.country,
         exchange: searchParams.exchange,
+        include_pending: includePending,
       }),
       getEntityTypeCountsAll(),
       listPopulatedPeriods(),
@@ -172,6 +176,24 @@ export default async function CompaniesIndexPage({
             </option>
           ))}
         </select>
+        <label
+          className={
+            "inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border px-2 text-[10px] uppercase tracking-wider transition-colors " +
+            (includePending
+              ? "border-tb-beacon bg-tb-beacon/15 text-tb-beacon"
+              : "border-tb-border bg-tb-surface text-tb-muted hover:border-tb-blue/60")
+          }
+          title="Include auto-added entities pending manual curation"
+        >
+          <input
+            type="checkbox"
+            name="pending"
+            value="true"
+            defaultChecked={includePending}
+            className="hidden"
+          />
+          Show pending
+        </label>
         <button
           type="submit"
           className="h-8 rounded-md bg-tb-blue px-3 text-xs font-medium text-white hover:brightness-110"
@@ -182,7 +204,8 @@ export default async function CompaniesIndexPage({
           searchParams.type ||
           searchParams.country ||
           searchParams.exchange ||
-          searchParams.metric) && (
+          searchParams.metric ||
+          includePending) && (
           <Link
             href="/companies"
             className="h-8 px-3 text-xs text-tb-muted hover:text-tb-text"

@@ -47,6 +47,7 @@ export async function getBiggestRevenueGrowers(limit = 6): Promise<MoverRow[]> {
        WHERE m.code IN ('revenue', 'ngr')
          AND mvc.entity_id IS NOT NULL AND mvc.market_id IS NULL
          AND e.is_active = true
+         AND (e.metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')
          AND mvc.disclosure_status = 'disclosed'
          AND p.period_type IN ('quarter','half_year','full_year','ltm')
      ),
@@ -121,6 +122,7 @@ export async function getMarginExpansionLeaders(limit = 6): Promise<MoverRow[]> 
        WHERE m.code = 'ebitda_margin'
          AND mvc.entity_id IS NOT NULL AND mvc.market_id IS NULL
          AND e.is_active = true
+         AND (e.metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')
          AND p.period_type IN ('quarter','half_year','full_year','ltm')
      ),
      per_entity AS (
