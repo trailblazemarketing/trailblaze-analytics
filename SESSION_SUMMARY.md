@@ -92,15 +92,23 @@ All returned HTTP 200 in dev with no server-side errors in the log after the SQL
 - `/reports`
 - `/methodology`
 
-## Commits (this session)
+## Commits (this session, chronological)
 
 - `f08dadb` — G1-G3 globals + Overview polish
 - `ac96843` — Markets / Companies / Operators polish
 - `10e2330` — Company detail / Market detail / Reports polish
 - `240ac34` — SQL fixes (ORDER BY alias, eur_rate numeric, metadata column)
-- `dd90655` — Companies compare rebuild
+- `dd90655` — Companies compare rebuild (side-by-side grid + Δ A−B)
+- `8026933` — Session summary doc
+- `448e574` — Opt pass 1: hide auto_added_needs_review entities default + toggle
+- `7d8d881` — Opt passes 2-3: Market detail chart + /markets/compare rebuild
+- `7e58cb1` — Opt passes 4-5: saturated heatmap palette + period-selector pill-group
+- `ed2251e` — Heatmap sort: priced first, unpriced tail
 
-Plus the ongoing CTO-review + optimization passes (see trailing commits).
+## Companion docs created
+
+- `CTO_REVIEW.md` — spec-conformance matrix, data-pipeline health, 5-pass plan
+- `SESSION_SUMMARY.md` — this file
 
 ## Deferred items
 
