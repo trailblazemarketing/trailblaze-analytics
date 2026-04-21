@@ -18,6 +18,7 @@ from trailblaze.db.models import (
     EntityTypeAssignment,
     Market,
     Metric,
+    MetricAlias,
     Period,
     Source,
 )
@@ -25,6 +26,7 @@ from trailblaze.db.session import session_scope
 from trailblaze.seed._data.entities import ENTITIES
 from trailblaze.seed._data.entity_types import ENTITY_TYPES
 from trailblaze.seed._data.markets import MARKETS
+from trailblaze.seed._data.metric_aliases import METRIC_ALIASES
 from trailblaze.seed._data.metrics import METRICS
 from trailblaze.seed._data.periods import PERIODS
 from trailblaze.seed._data.sources import SOURCES
@@ -57,7 +59,11 @@ def seed_sources(session: Session) -> int:
     # sources has no unique constraint on source_type alone in the schema —
     # we enforce "one row per source_type" by convention via a filtered check.
     existing = {s.source_type for s in session.query(Source.source_type).all()}
-    new_rows = [r for r in SOURCES if r["source_type"] not in existing]
+    new_rows = [
+        {"is_proprietary": False, **r}
+        for r in SOURCES
+        if r["source_type"] not in existing
+    ]
     if not new_rows:
         return 0
     session.execute(pg_insert(Source).values(new_rows))
@@ -66,6 +72,27 @@ def seed_sources(session: Session) -> int:
 
 def seed_metrics(session: Session) -> int:
     return _upsert(session, Metric, METRICS, ["code"])
+
+
+def seed_metric_aliases(session: Session) -> int:
+    """Maps alias codes to canonical metric_id. Upserts by alias_code."""
+    code_to_id = dict(session.query(Metric.code, Metric.id).all())
+    rows = []
+    for a in METRIC_ALIASES:
+        canonical_id = code_to_id.get(a["canonical_code"])
+        if canonical_id is None:
+            log.warning("Alias %r points at missing canonical %r — skipping",
+                        a["alias_code"], a["canonical_code"])
+            continue
+        rows.append({
+            "alias_code": a["alias_code"],
+            "canonical_metric_id": canonical_id,
+            "notes": a.get("notes"),
+        })
+    return _upsert(
+        session, MetricAlias, rows, ["alias_code"],
+        update_cols=["canonical_metric_id", "notes"],
+    )
 
 
 def seed_periods(session: Session) -> int:
@@ -173,6 +200,7 @@ def run_all() -> None:
             "entity_types": seed_entity_types(session),
             "sources": seed_sources(session),
             "metrics": seed_metrics(session),
+            "metric_aliases": seed_metric_aliases(session),
             "periods": seed_periods(session),
             "markets": seed_markets(session),
             "entities": seed_entities(session),

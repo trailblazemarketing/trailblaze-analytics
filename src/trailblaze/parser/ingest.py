@@ -111,9 +111,11 @@ def ingest(
     session.add(report)
     session.flush()  # populate report.id
 
-    # Link entities & markets the classifier identified
+    # Link entities & markets the classifier identified. Unknown entities are
+    # auto-created with status='auto_added_needs_review' so we don't lose the
+    # association — the catalog gets curated asynchronously.
     for mention in classification.primary_entities:
-        eid = resolver.entity(mention.name)
+        eid = resolver.entity(mention.name, auto_create=True)
         if eid is None:
             warnings.append(f"Unknown entity in classification: {mention.name!r}")
             continue
@@ -138,9 +140,9 @@ def ingest(
             if period_id_m is None:
                 warnings.append(f"Unknown period code: {m.period_code!r}")
                 continue
-            entity_id = resolver.entity(m.entity_name) if m.entity_name else None
-            if m.entity_name and entity_id is None:
-                warnings.append(f"Unknown entity in metric: {m.entity_name!r}")
+            entity_id = (
+                resolver.entity(m.entity_name, auto_create=True) if m.entity_name else None
+            )
             market_id = resolver.market(m.market_name) if m.market_name else None
             if m.market_name and market_id is None:
                 warnings.append(f"Unknown market in metric: {m.market_name!r}")
@@ -177,7 +179,9 @@ def ingest(
 
         # Ingest narratives
         for n in extraction.narratives:
-            entity_id = resolver.entity(n.entity_name) if n.entity_name else None
+            entity_id = (
+                resolver.entity(n.entity_name, auto_create=True) if n.entity_name else None
+            )
             market_id = resolver.market(n.market_name) if n.market_name else None
             session.add(Narrative(
                 report_id=report.id,
@@ -189,6 +193,13 @@ def ingest(
             narrative_count += 1
 
         warnings.extend(extraction.warnings)
+
+    # Surface auto-created entities so the catalog can be curated later.
+    if resolver.auto_added_entities:
+        warnings.append(
+            f"Auto-added {len(resolver.auto_added_entities)} entities "
+            f"(status=auto_added_needs_review) — review in entities table."
+        )
 
     # Reconcile parse_status based on actual outcomes
     if metric_count == 0:

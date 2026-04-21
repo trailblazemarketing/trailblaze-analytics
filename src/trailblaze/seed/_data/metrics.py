@@ -36,9 +36,17 @@ METRICS: list[dict] = [
     _m("casino_turnover", "Casino Turnover", "volume", "currency"),
 
     # Profitability
-    _m("ebitda", "EBITDA", "profitability", "currency", "EBITDA"),
+    _m("ebitda", "EBITDA", "profitability", "currency", "EBITDA",
+       description="Reported EBITDA (IFRS / GAAP as stated)."),
+    _m("adjusted_ebitda", "Adjusted EBITDA", "profitability", "currency", "Adj EBITDA",
+       description="Management-adjusted EBITDA, excluding one-offs (M&A, legal, restructuring). Headline metric for most operators."),
+    _m("staff_costs", "Staff Costs", "profitability", "currency",
+       description="Personnel expense line. Common in IFRS filings."),
+    _m("online_ebitda", "Online EBITDA", "profitability", "currency"),
     _m("ebitda_margin", "EBITDA Margin", "profitability", "percentage",
        is_calculable=True, calculation_formula="ebitda / revenue"),
+    _m("online_ebitda_margin", "Online EBITDA Margin", "profitability", "percentage",
+       is_calculable=True, calculation_formula="online_ebitda / online_revenue"),
     _m("operating_profit", "Operating Profit", "profitability", "currency"),
     _m("ebit_margin", "EBIT Margin", "profitability", "percentage",
        is_calculable=True, calculation_formula="operating_profit / revenue"),
@@ -62,7 +70,12 @@ METRICS: list[dict] = [
     _m("seo_revenue", "SEO Revenue", "marketing", "currency"),
 
     # Share
-    _m("market_share", "Market Share", "share", "percentage"),
+    _m("market_share", "Market Share", "share", "percentage",
+       description="Generic share of revenue / GGR when the report does not specify which basis."),
+    _m("market_share_ggr", "Market Share (GGR)", "share", "percentage",
+       description="Operator's share of total market GGR."),
+    _m("market_share_handle", "Market Share (Handle)", "share", "percentage",
+       description="Operator's share of total market handle (volume-based)."),
     _m("share_change", "Market Share Change", "share", "percentage"),
 
     # Sportsbook-specific
@@ -71,7 +84,11 @@ METRICS: list[dict] = [
 
     # Vertical splits
     _m("casino_revenue", "Casino Revenue", "revenue", "currency"),
+    _m("casino_ggr", "Casino GGR", "revenue", "currency",
+       description="Pre-bonus/promo gross gaming revenue from online casino. iGaming segment."),
     _m("sportsbook_revenue", "Sportsbook Revenue", "revenue", "currency"),
+    _m("sportsbook_ggr", "Sportsbook GGR", "revenue", "currency",
+       description="Pre-bonus/promo gross gaming revenue from sports betting."),
     _m("lottery_revenue", "Lottery Revenue", "revenue", "currency"),
     _m("dfs_revenue", "DFS Revenue", "revenue", "currency"),
     _m("bingo_revenue", "Bingo Revenue", "revenue", "currency"),
@@ -83,10 +100,24 @@ METRICS: list[dict] = [
     _m("pe_ratio", "P/E Ratio", "valuation", "ratio"),
     _m("market_cap", "Market Cap", "valuation", "currency"),
     _m("stock_price", "Stock Price", "valuation", "currency"),
+    _m("equity_value", "Equity Value", "valuation", "currency"),
+    _m("enterprise_value", "Enterprise Value", "valuation", "currency"),
+    _m("ownership_stake_pct", "Ownership Stake", "valuation", "percentage"),
+
+    # Cost & spend
+    _m("promotions_expense", "Promotions Expense", "profitability", "currency"),
+    _m("promotions_pct_ggr", "Promotions % of GGR", "profitability", "percentage",
+       is_calculable=True, calculation_formula="promotions_expense / ggr"),
 
     # Other operational
     _m("app_downloads", "App Downloads", "operational", "count"),
     _m("live_streamed_events", "Live-Streamed Events", "operational", "count"),
     _m("gaming_library_size", "Gaming Library Size", "operational", "count"),
     _m("licensee_count", "Licensee Count", "operational", "count"),
+
+    # Forward guidance
+    _m("revenue_guidance", "Revenue Guidance", "guidance", "currency",
+       description="Management's forward revenue guidance (point, midpoint, or range)."),
+    _m("ebitda_guidance", "EBITDA Guidance", "guidance", "currency",
+       description="Management's forward EBITDA guidance (point, midpoint, or range)."),
 ]

@@ -79,7 +79,9 @@ class ClassificationOutput(BaseModel):
 
 
 class ExtractedMetric(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Tool-use LLMs occasionally invent fields (e.g. market_share_pct on a metric
+    # row). "ignore" drops them rather than crashing the whole parse.
+    model_config = ConfigDict(extra="ignore")
     entity_name: str | None = None
     market_name: str | None = None
     metric_code: str = Field(description="Must match a row in the metrics dictionary (e.g. 'ggr').")
@@ -100,7 +102,7 @@ class ExtractedMetric(BaseModel):
 
 
 class ExtractedNarrative(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
     section_code: SectionCode
     entity_name: str | None = None
     market_name: str | None = None

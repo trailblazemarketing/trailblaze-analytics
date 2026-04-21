@@ -8,6 +8,7 @@ it becomes a hotspot later, move to a scheduled refresh or CONCURRENTLY.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from sqlalchemy import select, text
@@ -76,8 +77,11 @@ def parse_pdf(pdf_path: Path) -> IngestResult:
             parser_version=settings.parser_version,
         )
         # Refresh canonical view so downstream reads see the new values.
-        # Unique index is in place so CONCURRENTLY is safe after the first populate.
-        session.execute(text("REFRESH MATERIALIZED VIEW metric_value_canonical"))
+        # Skip during bulk backfills (set TRAILBLAZE_SKIP_MATVIEW_REFRESH=1) —
+        # REFRESH takes an ACCESS EXCLUSIVE lock, so doing it 300+ times
+        # serialises concurrent parses. Refresh once at the end of the batch.
+        if not os.getenv("TRAILBLAZE_SKIP_MATVIEW_REFRESH"):
+            session.execute(text("REFRESH MATERIALIZED VIEW metric_value_canonical"))
 
     log.info(
         "Ingested %s: status=%s metrics=%d narratives=%d warnings=%d",

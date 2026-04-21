@@ -223,6 +223,36 @@ class Metric(Base):
         ),
     )
 
+    aliases_rel: Mapped[list["MetricAlias"]] = relationship(
+        back_populates="canonical_metric", cascade="all, delete-orphan"
+    )
+
+
+class MetricAlias(Base):
+    """Maps LLM-emitted metric codes onto canonical `metrics.id`.
+
+    Consulted at ingest time before dropping an unknown metric_code, so
+    re-parsing only has to happen when the LLM invents a genuinely new
+    concept — not just a synonym for an existing one.
+    """
+
+    __tablename__ = "metric_aliases"
+
+    alias_code: Mapped[str] = mapped_column(Text, primary_key=True)
+    canonical_metric_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("metrics.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+
+    canonical_metric: Mapped["Metric"] = relationship(back_populates="aliases_rel")
+
+    __table_args__ = (
+        Index("ix_metric_aliases_canonical", "canonical_metric_id"),
+    )
+
 
 class Period(Base):
     __tablename__ = "periods"

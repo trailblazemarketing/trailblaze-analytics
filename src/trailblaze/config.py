@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     )
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     parser_model: str = Field(default="claude-opus-4-7", alias="PARSER_MODEL")
-    parser_version: str = Field(default="0.1.0", alias="PARSER_VERSION")
+    parser_version: str = Field(default="2.0.0", alias="PARSER_VERSION")
     pdf_inbox_dir: Path = Field(default=REPO_ROOT / "pdfs", alias="PDF_INBOX_DIR")
 
 
