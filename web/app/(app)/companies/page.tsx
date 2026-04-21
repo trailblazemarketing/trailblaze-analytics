@@ -1,0 +1,223 @@
+import Link from "next/link";
+import {
+  listCompanies,
+  getEntityTypeCountsAll,
+} from "@/lib/queries/companies";
+import { getEntityLeaderboard } from "@/lib/queries/analytics";
+import {
+  listPopulatedPeriods,
+  groupPeriodsForSelector,
+} from "@/lib/queries/periods";
+import { adaptEntityLeaderboardRows } from "@/lib/adapters";
+import { Leaderboard } from "@/components/primitives/leaderboard";
+import { PeriodSelector } from "@/components/layout/period-selector";
+import { Input } from "@/components/ui/input";
+
+export const dynamic = "force-dynamic";
+
+const METRIC_OPTIONS = [
+  { code: "revenue", label: "Revenue" },
+  { code: "ngr", label: "NGR" },
+  { code: "ebitda", label: "EBITDA" },
+  { code: "active_customers", label: "Active Users" },
+];
+
+export default async function CompaniesIndexPage({
+  searchParams,
+}: {
+  searchParams: {
+    q?: string;
+    type?: string;
+    country?: string;
+    exchange?: string;
+    metric?: string;
+    period?: string;
+  };
+}) {
+  const metric =
+    METRIC_OPTIONS.find((m) => m.code === searchParams.metric) ??
+    METRIC_OPTIONS[0];
+  const typeCode = searchParams.type || undefined;
+  const periodCode = searchParams.period ?? null;
+
+  const [lbRaw, companies, typeCounts, populatedPeriods] = await Promise.all([
+    getEntityLeaderboard({
+      metricCode: metric.code,
+      entityTypeCode: typeCode,
+      periodCode,
+      limit: 120,
+    }),
+    listCompanies({
+      search: searchParams.q,
+      entity_type: searchParams.type,
+      country: searchParams.country,
+      exchange: searchParams.exchange,
+    }),
+    getEntityTypeCountsAll(),
+    listPopulatedPeriods(),
+  ]);
+  const periodGroups = groupPeriodsForSelector(populatedPeriods);
+
+  // Narrow the leaderboard by the filter-applied company set
+  const allowed = new Set(companies.map((c) => c.id));
+  const filtered = lbRaw.filter((r) => allowed.has(r.entity_id));
+  const lb = adaptEntityLeaderboardRows(filtered);
+
+  const countries = Array.from(
+    new Set(companies.map((c) => c.headquarters_country).filter(Boolean)),
+  ).sort();
+  const exchanges = Array.from(
+    new Set(companies.map((c) => c.exchange).filter(Boolean)),
+  ).sort();
+
+  return (
+    <div className="space-y-4">
+      <header className="flex items-end justify-between">
+        <div>
+          <h1 className="text-lg font-semibold">Companies</h1>
+          <p className="text-xs text-tb-muted">
+            {companies.length.toLocaleString()} active ·{" "}
+            {typeCounts
+              .filter((t) => t.count > 0)
+              .map((t) => `${t.count} ${t.code}`)
+              .join(" · ")}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <PeriodSelector groups={periodGroups} currentCode={periodCode} />
+          <Link
+            href="/companies/compare"
+            className="text-xs text-tb-blue hover:underline"
+          >
+            Compare →
+          </Link>
+        </div>
+      </header>
+
+      <form className="flex flex-wrap items-center gap-2" action="/companies">
+        <Input
+          name="q"
+          defaultValue={searchParams.q ?? ""}
+          placeholder="Name, slug, ticker…"
+          className="max-w-xs"
+        />
+        <TypeChips current={searchParams.type} counts={typeCounts} />
+        {countries.length > 0 && (
+          <select
+            name="country"
+            defaultValue={searchParams.country ?? ""}
+            className="h-8 rounded-md border border-tb-border bg-tb-surface px-2 text-xs text-tb-text focus:border-tb-blue focus:outline-none"
+          >
+            <option value="">All HQ countries</option>
+            {countries.map((c) => (
+              <option key={c} value={c!}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
+        {exchanges.length > 0 && (
+          <select
+            name="exchange"
+            defaultValue={searchParams.exchange ?? ""}
+            className="h-8 rounded-md border border-tb-border bg-tb-surface px-2 text-xs text-tb-text focus:border-tb-blue focus:outline-none"
+          >
+            <option value="">All exchanges</option>
+            {exchanges.map((e) => (
+              <option key={e} value={e!}>
+                {e}
+              </option>
+            ))}
+          </select>
+        )}
+        <select
+          name="metric"
+          defaultValue={metric.code}
+          className="h-8 rounded-md border border-tb-border bg-tb-surface px-2 text-xs text-tb-text focus:border-tb-blue focus:outline-none"
+        >
+          {METRIC_OPTIONS.map((m) => (
+            <option key={m.code} value={m.code}>
+              Metric: {m.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="submit"
+          className="h-8 rounded-md bg-tb-blue px-3 text-xs font-medium text-white hover:brightness-110"
+        >
+          Apply
+        </button>
+        {(searchParams.q ||
+          searchParams.type ||
+          searchParams.country ||
+          searchParams.exchange ||
+          searchParams.metric) && (
+          <Link
+            href="/companies"
+            className="h-8 px-3 text-xs text-tb-muted hover:text-tb-text"
+          >
+            Clear
+          </Link>
+        )}
+      </form>
+
+      <Leaderboard
+        title={`Companies — ${metric.label}`}
+        subtitle={
+          typeCode
+            ? `Filtered to type: ${typeCode}`
+            : "All active companies with reported values"
+        }
+        valueLabel={metric.label.toUpperCase()}
+        rows={lb.rows}
+        total={lb.total}
+        columns={[
+          "rank",
+          "name",
+          "value",
+          "share",
+          "yoy",
+          "sparkline",
+          "ticker",
+        ]}
+        maxRows={60}
+      />
+    </div>
+  );
+}
+
+function TypeChips({
+  current,
+  counts,
+}: {
+  current: string | undefined;
+  counts: { code: string; count: number }[];
+}) {
+  const active = current ?? "";
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {counts.map((o) => {
+        const isActive = active === o.code;
+        return (
+          <label
+            key={o.code}
+            className={`cursor-pointer rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider transition-colors ${
+              isActive
+                ? "border-tb-blue bg-tb-blue/15 text-tb-blue"
+                : "border-tb-border bg-tb-surface text-tb-muted hover:border-tb-blue/60"
+            }`}
+          >
+            <input
+              type="radio"
+              name="type"
+              value={o.code}
+              defaultChecked={isActive}
+              className="hidden"
+            />
+            {o.code} ({o.count})
+          </label>
+        );
+      })}
+    </div>
+  );
+}

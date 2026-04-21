@@ -1,0 +1,157 @@
+"use client";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  Legend,
+  ReferenceDot,
+} from "recharts";
+
+export type TimeseriesPoint = {
+  period: string;
+  period_start: string;
+  [seriesKey: string]: string | number | null;
+};
+
+export type BeaconFlags = {
+  [seriesKey: string]: Set<string>; // period codes where the value is beacon
+};
+
+const PALETTE = [
+  "#2BA8E0", // tb-blue
+  "#10B981", // tb-success
+  "#2B2D8E", // tb-purple
+  "#F472B6", // pink
+  "#38BDF8", // sky
+  "#A78BFA", // violet
+];
+
+// Recharts Line doesn't natively do "dotted for some segments, solid for
+// others." We render two overlapping Lines per series: a solid one for the
+// disclosed points, and a dotted one that only shows values where the point
+// is Beacon™. At the seams, we also drop a ReferenceDot styled orange.
+export function MetricTimeseries({
+  data,
+  series,
+  beaconFlags,
+  height = 280,
+  yLabel,
+}: {
+  data: TimeseriesPoint[];
+  series: { key: string; label: string }[];
+  beaconFlags?: BeaconFlags;
+  height?: number;
+  yLabel?: string;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart data={data} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke="var(--tb-border)" strokeDasharray="2 4" vertical={false} />
+        <XAxis
+          dataKey="period"
+          tick={{ fill: "var(--tb-text-muted)", fontSize: 10, fontFamily: "JetBrains Mono" }}
+          axisLine={{ stroke: "var(--tb-border)" }}
+          tickLine={false}
+        />
+        <YAxis
+          tick={{ fill: "var(--tb-text-muted)", fontSize: 10, fontFamily: "JetBrains Mono" }}
+          axisLine={{ stroke: "var(--tb-border)" }}
+          tickLine={false}
+          label={
+            yLabel
+              ? {
+                  value: yLabel,
+                  angle: -90,
+                  position: "insideLeft",
+                  style: {
+                    fill: "var(--tb-text-muted)",
+                    fontSize: 10,
+                    textAnchor: "middle",
+                  },
+                }
+              : undefined
+          }
+        />
+        <Tooltip
+          contentStyle={{
+            background: "var(--tb-surface)",
+            border: "1px solid var(--tb-border)",
+            borderRadius: 4,
+            fontSize: 11,
+            fontFamily: "JetBrains Mono",
+            color: "var(--tb-text)",
+          }}
+          cursor={{ stroke: "var(--tb-blue)", strokeOpacity: 0.3 }}
+          formatter={(value: unknown, name: string, payload) => {
+            const key = (payload as { dataKey?: string })?.dataKey;
+            const periodCode = (payload as { payload?: { period: string } })
+              ?.payload?.period;
+            const isBeacon =
+              key && periodCode && beaconFlags?.[key]?.has(periodCode);
+            return [
+              `${value}${isBeacon ? " ™" : ""}`,
+              name,
+            ];
+          }}
+        />
+        <Legend
+          wrapperStyle={{ fontSize: 10, color: "var(--tb-text-muted)" }}
+          iconType="plainline"
+        />
+        {series.map((s, i) => {
+          const color = PALETTE[i % PALETTE.length];
+          return (
+            <Line
+              key={s.key}
+              type="monotone"
+              dataKey={s.key}
+              name={s.label}
+              stroke={color}
+              strokeWidth={1.5}
+              dot={(props: {
+                cx?: number;
+                cy?: number;
+                payload?: { period: string };
+                index?: number;
+              }) => {
+                const { cx, cy, payload, index } = props;
+                if (cx == null || cy == null || !payload) {
+                  return <g key={`${s.key}-${index ?? "na"}`} />;
+                }
+                const isBeacon = beaconFlags?.[s.key]?.has(payload.period);
+                return (
+                  <circle
+                    key={`${s.key}-${payload.period}`}
+                    cx={cx}
+                    cy={cy}
+                    r={isBeacon ? 3 : 2.5}
+                    fill={isBeacon ? "var(--tb-beacon)" : color}
+                    stroke={isBeacon ? "var(--tb-beacon)" : color}
+                    strokeWidth={isBeacon ? 1 : 0}
+                  />
+                );
+              }}
+              activeDot={{ r: 4, fill: color }}
+              connectNulls
+              strokeDasharray={
+                // If EVERY point in this series is beacon, dot the whole line.
+                beaconFlags?.[s.key] &&
+                data.every((d) =>
+                  d[s.key] == null
+                    ? true
+                    : beaconFlags[s.key].has(d.period),
+                )
+                  ? "3 3"
+                  : undefined
+              }
+            />
+          );
+        })}
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}

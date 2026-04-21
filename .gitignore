@@ -53,3 +53,12 @@ alembic/versions/__pycache__/
 # OS
 Thumbs.db
 desktop.ini
+
+# Cached data files (regenerable)
+scripts/ecb-hist.xml
+
+# Web app (Next.js)
+web/.next/
+web/node_modules/
+web/.env.local
+web/tsconfig.tsbuildinfo
