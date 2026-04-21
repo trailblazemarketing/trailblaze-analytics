@@ -82,6 +82,8 @@ _COUNTRIES = [
        iso_country="CY", currency="EUR"),
     _m("croatia", "Croatia", "country", parent_slug="europe",
        iso_country="HR", currency="EUR"),
+    _m("malta", "Malta", "country", parent_slug="europe",
+       iso_country="MT", currency="EUR"),
     # Nordics
     _m("sweden", "Sweden", "country", parent_slug="nordics",
        iso_country="SE", currency="SEK"),

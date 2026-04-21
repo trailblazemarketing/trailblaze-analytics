@@ -22,6 +22,12 @@ dependencies = [
     "pypdf>=4.2",
     "click>=8.1",
     "rich>=13.7",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "openpyxl>=3.1",
+    "pandas>=2.2",
+    "yfinance>=0.2.40",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +41,9 @@ dev = [
 [project.scripts]
 trailblaze-parse = "trailblaze.parser.cli:main"
 trailblaze-seed = "trailblaze.seed.cli:main"
+trailblaze-scrape-regulators = "trailblaze.scrapers.cli_regulators:main"
+trailblaze-scrape-stocks = "trailblaze.scrapers.cli_stocks:main"
+trailblaze-scrape-companies = "trailblaze.scrapers.cli_companies:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
