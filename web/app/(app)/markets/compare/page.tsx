@@ -4,13 +4,21 @@ import {
   getMarketBySlug,
   getBeaconEstimatesForValues,
 } from "@/lib/queries/markets";
+import { getScorecardSeries } from "@/lib/queries/analytics";
+import { buildPanelTiles, PANELS } from "@/lib/scorecard-builder";
 import type { MetricValueRow, Market } from "@/lib/types";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TH, TD, TR } from "@/components/ui/table";
 import { ValueCell } from "@/components/beacon/value-cell";
-import { MetricTimeseries } from "@/components/charts/metric-timeseries";
+import { Sparkline } from "@/components/beacon/sparkline";
+import { DeltaChip } from "@/components/beacon/delta-chip";
+import {
+  MetricTimeseries,
+  type TimeseriesPoint,
+  type BeaconFlags,
+} from "@/components/charts/metric-timeseries";
 import { pivotTimeseries } from "@/lib/pivot";
+import { formatEur } from "@/lib/format";
 import { MarketPickerForm } from "./picker-form";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +42,34 @@ export default async function MarketsComparePage({
   ).then((arr) => arr.filter((m): m is Market => m !== null));
 
   const marketIds = selected.map((m) => m.id);
+
+  // Per-market scorecard (Panel 7 primary) so we can render side-by-side tiles
+  const panel = PANELS.market;
+  const scorecardCodes = [
+    ...panel.primary.map((r) => r.code),
+    ...panel.secondary.map((r) => r.code),
+  ];
+  const perMarketTiles = await Promise.all(
+    selected.map(async (m) => {
+      const byCode = await getScorecardSeries({
+        marketId: m.id,
+        metricCodes: scorecardCodes,
+      });
+      const beaconIds: string[] = [];
+      byCode.forEach((rows) =>
+        rows.forEach((r) => {
+          if (
+            r.disclosure_status === "beacon_estimate" ||
+            r.disclosure_status === "derived"
+          )
+            beaconIds.push(r.metric_value_id);
+        }),
+      );
+      const beacon = await getBeaconEstimatesForValues(beaconIds);
+      return { market: m, tiles: buildPanelTiles("market", byCode, beacon) };
+    }),
+  );
+
   let values: MetricValueRow[] = [];
   if (marketIds.length > 0) {
     values = await query<MetricValueRow>(
@@ -64,7 +100,6 @@ export default async function MarketsComparePage({
       .map((v) => v.metric_value_id),
   );
 
-  // Group by metric
   const byMetric = new Map<
     string,
     {
@@ -85,20 +120,42 @@ export default async function MarketsComparePage({
     byMetric.get(v.metric_code)!.rows.push(v);
   }
 
-  const HEADLINE = ["ggr", "ngr", "active_users", "gaming_tax_revenue", "revenue"];
-  const sortedMetrics = Array.from(byMetric.values()).sort((a, b) => {
-    const ai = HEADLINE.indexOf(a.code);
-    const bi = HEADLINE.indexOf(b.code);
-    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
-  });
+  const ggrPivot = pivotTimeseries(
+    byMetric.get("online_ggr")?.rows ??
+      byMetric.get("ggr")?.rows ??
+      byMetric.get("sportsbook_ggr")?.rows ??
+      [],
+    (v) => marketById.get(v.market_id ?? "")?.slug ?? "unknown",
+    (v) => marketById.get(v.market_id ?? "")?.name ?? "unknown",
+  );
+  const handlePivot = pivotTimeseries(
+    byMetric.get("sportsbook_handle")?.rows ?? [],
+    (v) => marketById.get(v.market_id ?? "")?.slug ?? "unknown",
+    (v) => marketById.get(v.market_id ?? "")?.name ?? "unknown",
+  );
+
+  const HEADLINE = [
+    "online_ggr",
+    "ggr",
+    "sportsbook_handle",
+    "sportsbook_ggr",
+    "casino_ggr",
+    "ngr",
+  ];
+  const tableMetrics = Array.from(byMetric.values())
+    .filter((m) => HEADLINE.includes(m.code))
+    .sort((a, b) => HEADLINE.indexOf(a.code) - HEADLINE.indexOf(b.code));
+
+  const isPair = selected.length === 2;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <header>
         <h1 className="text-lg font-semibold">Compare markets</h1>
         <p className="text-xs text-tb-muted">
-          Pick up to 6 markets to view side by side. Canonical values shown;
-          Beacon™ estimates appear as dotted lines.
+          {selected.length === 0
+            ? "Pick 2-6 markets for side-by-side KPIs, charts, and quarterly tables."
+            : `Comparing ${selected.length} ${selected.length === 1 ? "market" : "markets"}.`}
         </p>
       </header>
 
@@ -107,89 +164,213 @@ export default async function MarketsComparePage({
         selected={slugs}
       />
 
-      {selected.length === 0 ? (
+      {selected.length === 0 && (
         <div className="panel p-6 text-xs text-tb-muted">
           Select markets above to begin the comparison.
         </div>
-      ) : sortedMetrics.length === 0 ? (
-        <div className="panel p-6 text-xs text-tb-muted">
-          No canonical metric values for those markets yet.
+      )}
+
+      {/* Header strip */}
+      {selected.length > 0 && (
+        <div className="grid gap-px overflow-hidden rounded-md border border-tb-border bg-tb-border md:grid-cols-2 lg:grid-cols-3">
+          {selected.map((m) => (
+            <div key={m.id} className="flex flex-col gap-1 bg-tb-surface px-4 py-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant="blue">{m.market_type.toUpperCase()}</Badge>
+                {m.iso_country && (
+                  <Badge variant="muted">{m.iso_country}</Badge>
+                )}
+                {m.is_regulated ? (
+                  <Badge variant="success">Regulated</Badge>
+                ) : (
+                  <Badge variant="muted">Pre-reg</Badge>
+                )}
+              </div>
+              <Link
+                href={`/markets/${m.slug}`}
+                className="truncate text-lg font-semibold text-tb-text hover:text-tb-blue"
+              >
+                {m.name}
+              </Link>
+              <p className="text-[10px] text-tb-muted">
+                {m.tax_rate_igaming != null
+                  ? `iGaming tax ${Number(m.tax_rate_igaming).toFixed(1)}%`
+                  : "—"}
+              </p>
+            </div>
+          ))}
         </div>
-      ) : (
-        <div className="space-y-4">
-          {sortedMetrics.map((mg) => {
-            const pivot = pivotTimeseries(
-              mg.rows,
-              (v) => marketById.get(v.market_id ?? "")?.slug ?? "unknown",
-              (v) => marketById.get(v.market_id ?? "")?.name ?? "unknown",
-            );
-            // Side-by-side table: rows = periods, cols = markets
-            const periodSet = new Set(mg.rows.map((r) => r.period_code));
-            const periods = Array.from(periodSet).sort().reverse();
-            const cellFor = (periodCode: string, marketId: string) =>
-              mg.rows.find(
-                (r) => r.period_code === periodCode && r.market_id === marketId,
-              ) ?? null;
+      )}
+
+      {/* Per-metric primary KPI grid */}
+      {selected.length > 0 && (
+        <div className="rounded-md border border-tb-border bg-tb-surface">
+          <div className="border-b border-tb-border px-3 py-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+              Primary KPIs · market panel
+            </h3>
+          </div>
+          <div className="divide-y divide-tb-border/60">
+            {panel.primary.map((r) => (
+              <div
+                key={r.code}
+                className="grid items-center gap-px bg-tb-border"
+                style={{
+                  gridTemplateColumns: `minmax(140px, 180px) repeat(${selected.length}, minmax(0, 1fr))${isPair ? " 120px" : ""}`,
+                }}
+              >
+                <div className="bg-tb-surface px-3 py-2 text-[10px] uppercase tracking-wider text-tb-muted">
+                  {r.label}
+                </div>
+                {perMarketTiles.map(({ market, tiles }) => {
+                  const t = tiles.primary.find((x) => x.code === r.code);
+                  return (
+                    <div
+                      key={market.id}
+                      className="flex items-center justify-between gap-2 bg-tb-surface px-3 py-2"
+                    >
+                      <span className="flex items-baseline gap-1">
+                        <span
+                          className={
+                            "font-mono text-base font-semibold " +
+                            (t?.valueFormatted ? "text-tb-text" : "text-tb-muted")
+                          }
+                        >
+                          {t?.valueFormatted ?? "—"}
+                        </span>
+                        {t?.spark && t.spark.length >= 2 && (
+                          <Sparkline
+                            values={t.spark}
+                            beaconMask={t.beaconMask}
+                            width={48}
+                            height={14}
+                          />
+                        )}
+                      </span>
+                      <DeltaChip pct={t?.yoy ?? null} size="xs" />
+                    </div>
+                  );
+                })}
+                {isPair && (
+                  <PairDeltaCell
+                    a={perMarketTiles[0].tiles.primary.find((x) => x.code === r.code)}
+                    b={perMarketTiles[1].tiles.primary.find((x) => x.code === r.code)}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Overlay charts */}
+      {selected.length > 0 && (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {ggrPivot.data.length > 0 && (
+            <div className="rounded-md border border-tb-border bg-tb-surface">
+              <div className="border-b border-tb-border px-3 py-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                  GGR — side by side
+                </h3>
+              </div>
+              <div className="p-2">
+                <MetricTimeseries
+                  data={ggrPivot.data as TimeseriesPoint[]}
+                  series={ggrPivot.series}
+                  beaconFlags={ggrPivot.beaconFlags as BeaconFlags}
+                  height={220}
+                />
+              </div>
+            </div>
+          )}
+          {handlePivot.data.length > 0 && (
+            <div className="rounded-md border border-tb-border bg-tb-surface">
+              <div className="border-b border-tb-border px-3 py-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                  Sportsbook handle — side by side
+                </h3>
+              </div>
+              <div className="p-2">
+                <MetricTimeseries
+                  data={handlePivot.data as TimeseriesPoint[]}
+                  series={handlePivot.series}
+                  beaconFlags={handlePivot.beaconFlags as BeaconFlags}
+                  height={220}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Per-metric quarterly tables */}
+      {selected.length > 0 && tableMetrics.length > 0 && (
+        <div className="space-y-3">
+          {tableMetrics.map((mg) => {
+            const periods = Array.from(new Set(mg.rows.map((r) => r.period_code)))
+              .sort()
+              .reverse()
+              .slice(0, 8);
+            const cellFor = (p: string, mid: string) =>
+              mg.rows.find((r) => r.period_code === p && r.market_id === mid) ??
+              null;
             return (
-              <Card key={mg.code}>
-                <CardHeader>
+              <div
+                key={mg.code}
+                className="rounded-md border border-tb-border bg-tb-surface"
+              >
+                <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <CardTitle>{mg.name}</CardTitle>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                      {mg.name}
+                    </h3>
                     <code className="font-mono text-[10px] text-tb-muted">
                       {mg.code}
                     </code>
                   </div>
-                  <Badge variant="muted">
-                    {mg.rows[0]?.metric_unit_type ?? ""}
-                  </Badge>
-                </CardHeader>
-                <CardContent>
-                  {pivot.data.length > 0 && (
-                    <div className="mb-3">
-                      <MetricTimeseries
-                        data={pivot.data}
-                        series={pivot.series}
-                        beaconFlags={pivot.beaconFlags}
-                        height={220}
-                      />
-                    </div>
-                  )}
-                  <Table>
-                    <THead>
-                      <tr>
-                        <TH>Period</TH>
-                        {selected.map((m) => (
-                          <TH key={m.id} className="text-right">
-                            {m.name}
-                          </TH>
-                        ))}
-                      </tr>
-                    </THead>
-                    <TBody>
-                      {periods.map((p) => (
-                        <TR key={p}>
-                          <TD className="font-mono text-tb-muted">{p}</TD>
-                          {selected.map((m) => {
-                            const c = cellFor(p, m.id);
-                            return (
-                              <TD key={m.id} className="text-right">
-                                {c ? (
-                                  <ValueCell
-                                    v={c}
-                                    beacon={beaconMap.get(c.metric_value_id) ?? null}
-                                  />
-                                ) : (
-                                  <span className="font-mono text-tb-muted">—</span>
-                                )}
-                              </TD>
-                            );
-                          })}
-                        </TR>
+                  <Badge variant="muted">{mg.rows[0]?.metric_unit_type}</Badge>
+                </div>
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>Period</TH>
+                      {selected.map((m) => (
+                        <TH key={m.id} className="text-right">
+                          {m.name}
+                        </TH>
                       ))}
-                    </TBody>
-                  </Table>
-                </CardContent>
-              </Card>
+                    </tr>
+                  </THead>
+                  <TBody>
+                    {periods.map((p) => (
+                      <TR key={p}>
+                        <TD className="py-1 font-mono text-[11px] text-tb-muted">
+                          {p}
+                        </TD>
+                        {selected.map((m) => {
+                          const cell = cellFor(p, m.id);
+                          return (
+                            <TD key={m.id} className="py-1 text-right">
+                              {cell ? (
+                                <ValueCell
+                                  v={cell}
+                                  beacon={
+                                    beaconMap.get(cell.metric_value_id) ?? null
+                                  }
+                                />
+                              ) : (
+                                <span className="font-mono text-tb-muted">
+                                  —
+                                </span>
+                              )}
+                            </TD>
+                          );
+                        })}
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </div>
             );
           })}
         </div>
@@ -202,4 +383,58 @@ export default async function MarketsComparePage({
       </p>
     </div>
   );
+}
+
+function PairDeltaCell({
+  a,
+  b,
+}: {
+  a: import("@/components/primitives/scorecard").KpiTile | undefined;
+  b: import("@/components/primitives/scorecard").KpiTile | undefined;
+}) {
+  const aVal = valueFor(a);
+  const bVal = valueFor(b);
+  if (aVal == null || bVal == null) {
+    return (
+      <div className="flex flex-col items-end justify-center bg-tb-surface px-3 py-2">
+        <span className="text-[9px] uppercase tracking-wider text-tb-muted">Δ</span>
+        <span className="font-mono text-xs text-tb-muted">—</span>
+      </div>
+    );
+  }
+  const diff = aVal - bVal;
+  const isPct = a?.unitHint === "%";
+  const label = isPct
+    ? `${diff > 0 ? "+" : ""}${diff.toFixed(1)}pp`
+    : formatEur(diff);
+  return (
+    <div className="flex flex-col items-end justify-center bg-tb-surface px-3 py-2">
+      <span className="text-[9px] uppercase tracking-wider text-tb-muted">
+        Δ A − B
+      </span>
+      <span
+        className={
+          "font-mono text-xs " +
+          (diff > 0
+            ? "text-tb-success"
+            : diff < 0
+            ? "text-tb-danger"
+            : "text-tb-muted")
+        }
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function valueFor(
+  t: import("@/components/primitives/scorecard").KpiTile | undefined,
+): number | null {
+  if (!t || !t.spark || t.spark.length === 0) return null;
+  for (let i = t.spark.length - 1; i >= 0; i--) {
+    const v = t.spark[i];
+    if (v != null && Number.isFinite(v)) return v;
+  }
+  return null;
 }

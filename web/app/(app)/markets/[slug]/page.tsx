@@ -28,9 +28,15 @@ import { PeriodSelector } from "@/components/layout/period-selector";
 import { ReportLink } from "@/components/reports/report-link";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TH, TD, TR } from "@/components/ui/table";
+import {
+  MetricTimeseries,
+  type TimeseriesPoint,
+  type BeaconFlags,
+} from "@/components/charts/metric-timeseries";
 import { formatDate, formatMetricValueEur } from "@/lib/format";
 import { query } from "@/lib/db";
 import type { MetricValueRow } from "@/lib/types";
+import { nativeToEur, toRawNumeric } from "@/lib/queries/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -223,6 +229,53 @@ export default async function MarketDetailPage({
     if (!byMetric.has(r.metric_code)) byMetric.set(r.metric_code, []);
     byMetric.get(r.metric_code)!.push(r);
   }
+
+  // Opt-pass 2: primary market time-series chart. Pick the best-covered
+  // metric we have for this market from a prioritized list, then render a
+  // line chart with solid-disclosed + dotted-Beacon segments.
+  const CHART_PREF = [
+    "online_ggr",
+    "online_ngr",
+    "sportsbook_handle",
+    "sportsbook_ggr",
+    "sportsbook_revenue",
+    "ggr",
+  ];
+  let chartMetricCode: string | null = null;
+  for (const code of CHART_PREF) {
+    if ((byMetric.get(code) ?? []).length >= 3) {
+      chartMetricCode = code;
+      break;
+    }
+  }
+  let chartData: TimeseriesPoint[] = [];
+  let chartBeaconFlags: BeaconFlags = {};
+  let chartLabel = "";
+  if (chartMetricCode) {
+    const rs = [...(byMetric.get(chartMetricCode) ?? [])].sort((a, b) =>
+      a.period_start.localeCompare(b.period_start),
+    );
+    chartLabel = rs[0]?.metric_display_name ?? chartMetricCode;
+    chartData = rs.map((r) => ({
+      period: r.period_code,
+      period_start: r.period_start,
+      [chartLabel]:
+        r.metric_unit_type === "currency"
+          ? nativeToEur(r.value_numeric, r.unit_multiplier, r.eur_rate)
+          : toRawNumeric(r.value_numeric, r.unit_multiplier),
+    }));
+    chartBeaconFlags = {
+      [chartLabel]: new Set(
+        rs
+          .filter(
+            (r) =>
+              r.disclosure_status === "beacon_estimate" ||
+              r.disclosure_status === "derived",
+          )
+          .map((r) => r.period_code),
+      ),
+    };
+  }
   for (const code of TIME_MATRIX_METRICS) {
     const rs = byMetric.get(code);
     if (!rs || rs.length === 0) continue;
@@ -302,6 +355,31 @@ export default async function MarketDetailPage({
           </div>
         }
       />
+
+      {/* Primary time-series chart (opt-pass 2) — solid disclosed, dotted Beacon */}
+      {chartMetricCode && chartData.length >= 3 && (
+        <div className="rounded-md border border-tb-border bg-tb-surface">
+          <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+            <div>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                {chartLabel} — time series
+              </h3>
+              <p className="mt-0.5 text-[10px] text-tb-muted">
+                Last {chartData.length} periods · solid = disclosed · dotted = Beacon™
+              </p>
+            </div>
+            <span className="font-mono text-[10px] text-tb-muted">EUR</span>
+          </div>
+          <div className="p-2">
+            <MetricTimeseries
+              data={chartData}
+              series={[{ key: chartLabel, label: chartLabel }]}
+              beaconFlags={chartBeaconFlags}
+              height={220}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 2-col: operators in market (cap 15, MD1) | time matrix */}
       <div className="grid gap-3 lg:grid-cols-2">
