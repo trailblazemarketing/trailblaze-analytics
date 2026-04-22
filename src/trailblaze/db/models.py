@@ -293,7 +293,8 @@ class Source(Base):
     __table_args__ = (
         CheckConstraint(
             "source_type in ('trailblaze_pdf','regulator_filing','sec_filing','company_ir',"
-            "'stock_api','industry_trade','social_media','beacon_estimate','manual_entry')",
+            "'stock_api','industry_trade','social_media','beacon_estimate','manual_entry',"
+            "'analyst_note')",
             name="ck_sources_source_type",
         ),
         CheckConstraint(
@@ -572,6 +573,41 @@ class BeaconEstimate(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# gmail_ingested_messages — idempotency + audit log for Gmail pipeline
+# ---------------------------------------------------------------------------
+
+
+class GmailIngestedMessage(Base):
+    __tablename__ = "gmail_ingested_messages"
+
+    message_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    sender_email: Mapped[str] = mapped_column(Text, nullable=False)
+    sender_name: Mapped[str | None] = mapped_column(Text)
+    subject: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime | None] = mapped_column()
+    ingested_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), nullable=False
+    )
+    report_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("reports.id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    pdf_filename: Mapped[str | None] = mapped_column(Text)
+
+    report: Mapped[Report | None] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('ingested','error','rejected_sender','skipped_duplicate')",
+            name="ck_gmail_ingested_messages_status",
+        ),
+        Index("ix_gmail_ingested_messages_sender", "sender_email"),
+        Index("ix_gmail_ingested_messages_status", "status"),
+    )
+
+
 # Explicit export list keeps `from trailblaze.db.models import *` predictable and
 # ensures Alembic's autogenerate registers everything.
 __all__ = [
@@ -579,6 +615,7 @@ __all__ = [
     "Entity",
     "EntityType",
     "EntityTypeAssignment",
+    "GmailIngestedMessage",
     "Market",
     "MarketTaxHistory",
     "Metric",

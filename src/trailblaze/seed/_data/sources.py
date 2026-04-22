@@ -59,4 +59,11 @@ SOURCES: list[dict] = [
         "confidence_tier": "high",
         "display_label": "Manual entry",
     },
+    {
+        "source_type": "analyst_note",
+        "name": "Analyst note (Gmail ingestion)",
+        "confidence_tier": "verified",
+        "display_label": "Analyst note",
+        "is_proprietary": True,
+    },
 ]
