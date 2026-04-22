@@ -61,8 +61,11 @@ export default async function HomePage({
     marginLeaders,
     commentary,
   ] = await Promise.all([
+    // B3: switched from `online_ggr` (only 9 markets covered) to
+    // `sportsbook_ggr` (37 markets, much better YoY coverage). UI label
+    // updated below to match.
     getMarketLeaderboard({
-      metricCode: "online_ggr",
+      metricCode: "sportsbook_ggr",
       periodCode,
       limit: 15,
     }),
@@ -101,13 +104,16 @@ export default async function HomePage({
           <PeriodSelector groups={periodGroups} currentCode={periodCode} />
         </header>
 
-        {/* Panel A + B: Markets leaderboard (2/3) · Right column stacked (1/3) */}
-        <div className="grid gap-3 lg:grid-cols-3">
+        {/* Panel A + B: Markets leaderboard (2/3) · Right column stacked (1/3)
+            items-start: each panel takes its natural content height. Without
+            this, the grid forces panels to match the tallest column, leaving
+            an empty band below the leaderboard's TOTAL row before "View all". */}
+        <div className="grid items-start gap-3 lg:grid-cols-3">
           <Leaderboard
             className="lg:col-span-2"
             title="Markets"
-            subtitle="Top markets by online GGR (latest period)"
-            valueLabel="ONLINE GGR"
+            subtitle="Top markets by sportsbook GGR (latest period)"
+            valueLabel="SPORTSBOOK GGR"
             rows={markets.rows}
             total={markets.total}
             columns={[

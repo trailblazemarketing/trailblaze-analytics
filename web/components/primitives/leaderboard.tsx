@@ -135,7 +135,7 @@ export function Leaderboard({
                 </th>
               )}
               {effectiveColumns.includes("share") && (
-                <th className="w-[100px] px-3 py-1 text-left">Share</th>
+                <th className="w-[110px] px-3 py-1 text-right">Share</th>
               )}
               {effectiveColumns.includes("yoy") && (
                 <th className="w-[80px] px-3 py-1 text-right">YoY</th>
@@ -210,19 +210,19 @@ export function Leaderboard({
                   </td>
                 )}
                 {effectiveColumns.includes("share") && (
-                  <td className="px-3 py-1">
+                  <td className="px-3 py-1 text-right">
                     {row.share != null ? (
-                      <div className="flex items-center gap-1.5">
-                        <div
+                      <span className="inline-flex items-center justify-end gap-1.5">
+                        <span
                           className="h-1.5 rounded-sm bg-tb-blue/30"
                           style={{
-                            width: `${Math.max(4, (row.share / maxShare) * 60)}px`,
+                            width: `${Math.max(4, (row.share / maxShare) * 50)}px`,
                           }}
                         />
-                        <span className="font-mono text-[10px] text-tb-muted">
+                        <span className="w-[42px] text-right font-mono text-[10px] tabular-nums text-tb-muted">
                           {row.share.toFixed(1)}%
                         </span>
-                      </div>
+                      </span>
                     ) : (
                       <span className="font-mono text-[10px] text-tb-muted">—</span>
                     )}
@@ -312,7 +312,7 @@ export function Leaderboard({
                   </td>
                 )}
                 {effectiveColumns.includes("share") && (
-                  <td className="px-3 py-1 font-mono text-[10px] text-tb-muted">
+                  <td className="px-3 py-1 text-right font-mono text-[10px] tabular-nums text-tb-muted">
                     100.0%
                   </td>
                 )}

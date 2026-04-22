@@ -226,9 +226,11 @@ function SecondaryTile({ kpi }: { kpi: KpiTile }) {
           <sup className="beacon-tm text-[8px]">™</sup>
         )}
       </div>
-      <div className="flex items-center justify-between text-[10px]">
+      {/* B5: dropped per-tile SourceLabel — 4-8 secondary tiles all
+          repeating "Trailblaze Report" was clutter. Provenance still lives
+          on the primary tile and on the quarterly breakdown rows. */}
+      <div className="flex items-center justify-end text-[10px]">
         <DeltaChip pct={kpi.yoy} size="xs" />
-        {kpi.source && <SourceLabel source={kpi.source} />}
       </div>
     </div>
   );

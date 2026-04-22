@@ -543,8 +543,9 @@ export default async function CompanyDetailPage({
         />
       )}
 
-      {/* CD5: Main body — two columns */}
-      <div className="grid gap-3 lg:grid-cols-5">
+      {/* CD5: Main body — two columns. items-start so the chart panel doesn't
+          stretch to match the (taller) narrative stack on the right. */}
+      <div className="grid items-start gap-3 lg:grid-cols-5">
         <div className="rounded-md border border-tb-border bg-tb-surface lg:col-span-3">
           <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
             <div>

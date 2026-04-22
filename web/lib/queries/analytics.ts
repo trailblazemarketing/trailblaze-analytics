@@ -245,11 +245,11 @@ export async function getEntityLeaderboard(opts: {
     FROM entities e
     JOIN per_entity latest ON latest.entity_id = e.id ${latestFilter}
     LEFT JOIN per_entity prev ON prev.entity_id = e.id
-      AND prev.start_date <= (latest.start_date - INTERVAL '330 days')::date
-      AND prev.start_date >= (latest.start_date - INTERVAL '400 days')::date
+      AND prev.start_date <= (latest.start_date - INTERVAL '270 days')::date
+      AND prev.start_date >= (latest.start_date - INTERVAL '430 days')::date
       AND prev.rn = (SELECT MIN(rn) FROM per_entity WHERE entity_id = e.id AND
-                     start_date <= (latest.start_date - INTERVAL '330 days')::date
-                     AND start_date >= (latest.start_date - INTERVAL '400 days')::date)
+                     start_date <= (latest.start_date - INTERVAL '270 days')::date
+                     AND start_date >= (latest.start_date - INTERVAL '430 days')::date)
     WHERE e.is_active = true
     ORDER BY (latest.value_numeric / NULLIF(latest.eur_rate::numeric, 0) * COALESCE(
       CASE latest.unit_multiplier
@@ -403,11 +403,11 @@ export async function getMarketLeaderboard(opts: {
     FROM markets mk
     JOIN per_market latest ON latest.market_id = mk.id ${latestFilter}
     LEFT JOIN per_market prev ON prev.market_id = mk.id
-      AND prev.start_date <= (latest.start_date - INTERVAL '330 days')::date
-      AND prev.start_date >= (latest.start_date - INTERVAL '400 days')::date
+      AND prev.start_date <= (latest.start_date - INTERVAL '270 days')::date
+      AND prev.start_date >= (latest.start_date - INTERVAL '430 days')::date
       AND prev.rn = (SELECT MIN(rn) FROM per_market WHERE market_id = mk.id AND
-                     start_date <= (latest.start_date - INTERVAL '330 days')::date
-                     AND start_date >= (latest.start_date - INTERVAL '400 days')::date)
+                     start_date <= (latest.start_date - INTERVAL '270 days')::date
+                     AND start_date >= (latest.start_date - INTERVAL '430 days')::date)
     WHERE 1=1 ${typeFilter}
     ORDER BY (latest.value_numeric / NULLIF(latest.eur_rate::numeric, 0) * COALESCE(
       CASE latest.unit_multiplier
@@ -523,8 +523,14 @@ export function nativeToEur(
   return raw / r;
 }
 
-// Gated YoY: both sides must be present, disclosed, and apples-to-apples.
+// Gated YoY: requires apples-to-apples comparison and bounded result.
 // Returns null when any precondition fails — the UI then shows em-dash.
+//
+// B3 loosening: cur must be `disclosed`, but prev may be `disclosed` OR
+// `partially_disclosed` (regulator filings often carry "partially_disclosed"
+// — the value itself is real, just one of its segment splits is missing).
+// Beacon™ / derived prev values are still rejected: we don't want a YoY
+// computed against a model output to be presented as ground truth.
 export function yoyPctGated(opts: {
   cur: string | null;
   curMult: UnitMultiplier;
@@ -538,8 +544,13 @@ export function yoyPctGated(opts: {
   prevDisclosure: DisclosureStatus | null;
   unitType: UnitType;
 }): number | null {
-  // Both sides must be disclosed
-  if (opts.curDisclosure !== "disclosed" || opts.prevDisclosure !== "disclosed")
+  // Both sides may be `disclosed` or `partially_disclosed` — the headline
+  // value is real either way; if we already render the value cell we can
+  // honestly render the YoY computed from it. Beacon™ / derived sides
+  // are still rejected (don't pass model output off as ground-truth YoY).
+  const allowed: DisclosureStatus[] = ["disclosed", "partially_disclosed"];
+  if (!allowed.includes(opts.curDisclosure)) return null;
+  if (!opts.prevDisclosure || !allowed.includes(opts.prevDisclosure))
     return null;
   if (opts.cur == null || opts.prev == null) return null;
 

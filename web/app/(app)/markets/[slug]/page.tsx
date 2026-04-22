@@ -137,6 +137,23 @@ export default async function MarketDetailPage({
     tmPeriods.map((p) => [p.code, p.display_name ?? p.code]),
   );
 
+  // B4: load direct sub-markets so the page can show a "Sub-markets" links
+  // strip when this is a country/region. Strict children only — no recursion.
+  const subMarkets = await query<{
+    id: string;
+    name: string;
+    slug: string;
+    market_type: string;
+    val_count: number;
+  }>(
+    `SELECT mk.id, mk.name, mk.slug, mk.market_type,
+            (SELECT COUNT(*)::int FROM metric_values mv WHERE mv.market_id = mk.id) AS val_count
+     FROM markets mk
+     WHERE mk.parent_market_id = $1
+     ORDER BY mk.name`,
+    [market.id],
+  );
+
   const [byCode, reports, taxHistory, operatorsRaw, narratives, tmRowsRaw, regulatoryFilings] =
     await Promise.all([
       getScorecardSeries({ marketId: market.id, metricCodes: scorecardCodes }),
@@ -356,6 +373,41 @@ export default async function MarketDetailPage({
         }
       />
 
+      {/* B4: Sub-markets — only when this market has direct children (e.g.
+          United States → 28 states, Canada → 2 provinces). Data is NOT
+          mixed into the parent's tables; this is a links strip only so an
+          analyst can drill into the right sub-market. */}
+      {subMarkets.length > 0 && (
+        <div className="rounded-md border border-tb-border bg-tb-surface">
+          <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+            <div>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                Sub-markets ({subMarkets.length})
+              </h3>
+              <p className="mt-0.5 text-[10px] text-tb-muted">
+                Direct children of {market.name} — data is reported per sub-market and not aggregated here
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5 px-3 py-2">
+            {subMarkets.map((s) => (
+              <Link
+                key={s.id}
+                href={`/markets/${s.slug}`}
+                className="inline-flex items-center gap-1.5 rounded border border-tb-border bg-tb-bg px-2 py-1 text-[10px] text-tb-text hover:border-tb-blue hover:text-tb-blue"
+              >
+                <span>{s.name}</span>
+                {s.val_count > 0 && (
+                  <span className="font-mono text-[9px] text-tb-muted">
+                    {s.val_count}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Primary time-series chart (opt-pass 2) — solid disclosed, dotted Beacon */}
       {chartMetricCode && chartData.length >= 3 && (
         <div className="rounded-md border border-tb-border bg-tb-surface">
@@ -407,7 +459,7 @@ export default async function MarketDetailPage({
 
       {/* MD2: Regulatory filings — compact list in side panel alongside
           tax history so market page carries the full regulator story */}
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="grid items-start gap-3 lg:grid-cols-3">
         {regulatoryFilings.length > 0 ? (
           <div className="rounded-md border border-tb-border bg-tb-surface">
             <div className="border-b border-tb-border px-3 py-2">
