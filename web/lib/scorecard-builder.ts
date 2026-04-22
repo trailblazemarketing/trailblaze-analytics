@@ -131,16 +131,22 @@ export const PANELS = {
     ],
   },
   market: {
+    // Primary slot 3 was `handle` ("Sportsbook Handle"): 8 rows across 3
+    // state markets globally — sparse and semantically misleading (the
+    // dictionary display_name for `handle` is just "Handle"). Swapped with
+    // secondary `sportsbook_handle` which carries 391 rows across 29
+    // markets at country + province + state scope and is the actual
+    // sportsbook-handle metric. Label now matches the dictionary.
     primary: [
       { code: "online_ggr", label: "Online GGR (LTM)" },
       { code: "online_ngr", label: "Online NGR" },
-      { code: "handle", label: "Sportsbook Handle" },
+      { code: "sportsbook_handle", label: "Sportsbook Handle" },
       { code: "ggr", label: "Total GGR" },
     ],
     secondary: [
       { code: "sportsbook_revenue", label: "Sportsbook Rev" },
       { code: "casino_revenue", label: "iGaming Rev" },
-      { code: "sportsbook_handle", label: "Sports Handle" },
+      { code: "handle", label: "Total Handle" },
       { code: "sportsbook_turnover", label: "Sports Turnover" },
       { code: "active_customers", label: "Active Players" },
       { code: "ftd", label: "FTDs" },
