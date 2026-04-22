@@ -1,133 +1,148 @@
-# T2 Polish Session Summary
+# T3-Gmail Session Summary
 
-**Date:** 2026-04-21 (overnight unattended)
+**Date:** 2026-04-22 (unattended run)
 **Branch:** main
-**Base commit:** 84b26ae (pre-polish checkpoint)
+**Base commit:** 8a1d848
+**This session's commits:**
+- `a3bac5f` — T3-Gmail step 1-2: deps + migration 0003 (analyst_note + gmail_ingested_messages)
+- `<next>` — T3-Gmail: full pipeline (client / render / ingest / CLI) + SCRAPERS_STATUS.md
 
-## What shipped
+## OAuth consent required — next step for the user
 
-### G1 — density pass (global)
-- App shell padding: `py-5 → py-3`
-- Leaderboard row height: `py-1.5 → py-1`, sparkline column width 64px → 60px (brief spec)
-- Module gap: `space-y-4 → space-y-3` across every page (16px gaps)
-- View-all footer height: `py-1.5 → py-1`
+**The first live run needs interactive browser consent** to authorise the Gmail
+API scope. That can't be done unattended, so the end-to-end test is deferred.
 
-### G2 — sparkline coverage
-- Bug fix in `getEntityLeaderboard` / `getMarketLeaderboard`: when `periodCode` was set, the scoped CTE was pre-filtered to one period, so `spark_raw` only contained a single point. Refactored so scoped keeps full history; period-pin is applied to the `latest` JOIN.
-- Leaderboard sparkline guard tightened from `≥2 points` to `≥3 real (non-null) points` per brief.
-- Sparkline dimensions: 60 × 20, stroke 1.2px, blue for disclosed, dotted amber for Beacon™ segments (unchanged).
+### To complete authentication (one-time, ~30 seconds)
 
-### G3 — Beacon column auto-hide
-- `Leaderboard` computes `hasBeaconSignal` and drops the `beacon_coverage` column when every visible row reports 0% (or null).
-- Keeps architecture intact: column reappears automatically when Beacon™ estimates land.
-- Market detail leaderboards can force the column on via `forceBeaconColumn` prop (not yet wired — 0% is still 0% with no Beacon data in DB).
+```bash
+cd C:/Users/Andrew/Documents/trailblaze-analytics
+source .venv/Scripts/activate
+trailblaze-scrape-gmail --dry-run
+```
 
-### Overview
-- O1 DATA DROPS module, stacked under Recent Reports in the right column. Synthesized (no `activity_log` table) from: most-recent parser run, regulator filing, stock price ingest, narrative extraction burst, entity auto-add burst. Fresh (< 24h) rows get a green dot; older rows get a grey dot.
-- O2 bottom 3-column module: Biggest Revenue Growers, Margin Expansion Leaders, Recent Commentary. New `lib/queries/movers.ts` and `components/overview/movers-row.tsx`.
-- O3 leaderboard visible rows cap bumped to 12–15 (depends on panel width); density pass makes 10–12 fit on 1080p easily.
+On first invocation:
+1. A browser window opens to the Google consent screen for the
+   `trailblaze-gmail-ingest` OAuth client.
+2. Sign in as a `trailblaze-marketing.com` Workspace user (the app is set to
+   Internal audience).
+3. Click **Allow** on the `gmail.modify` scope.
+4. The script writes `secrets/gmail_token.json` (refresh token); subsequent
+   runs are non-interactive.
 
-### Markets
-- M1 sparkline fix lands via the G2 query refactor.
-- M2 filter chips already had blue-border + blue-tint active state — confirmed working, no change needed.
-- M3 helper text under the metric switcher: `Showing N of M markets with data for <metric>`.
+After the token is saved, the live end-to-end test is:
 
-### Companies (index)
-- C1 aggregate KPI strip (4 tiles): total tracked companies, combined LTM revenue (EUR), weighted EBITDA margin, listed-vs-private split. New `getCompaniesAggregateKpis()` query.
-- C2 entity-type chip colors wired at Leaderboard component level (shared across every leaderboard on every page). Subtle distinct backgrounds: operator blue-grey, B2B warm-grey, affiliate green-grey, lottery purple-grey, DFS amber-grey. Default (market_type chips etc.) keep the old bordered style.
-- C3 ticker join is already correct in the query layer — any em-dashes in live data reflect entities actually missing a ticker in the DB, not a broken join.
+```bash
+# 1. In Gmail: apply the "Trailblaze-Ingest" label to a real Oyvind email
+#    (e.g. the FDJ UNITED Q1-26 note referenced in the brief). The script
+#    creates the label on first run, so you may need to re-run --dry-run once
+#    if the label didn't exist before.
+# 2. Run the ingestion:
+trailblaze-scrape-gmail -v
+```
 
-### Operators
-- OP1 heatmap replaced with a custom CSS-grid implementation (prior version was Recharts Treemap with irreducible padding). Tiles sized by market cap buckets (sqrt-scaled), 1px gaps, all 23 tickered operators visible.
-- OP2 bottom 3-module composition (same as Overview O2).
-- OP3 leaderboard `extra` column now packs PRICE / DAY% / MARKET CAP / EV·EBITDA per row, fed from the heatmap snapshot (no duplicate queries).
-- Added missing PeriodSelector to the page header.
+### Verification queries (Step 9)
 
-### Company detail (the anchor page)
-- CD1 header: chip row (entity-type, LISTED/PRIVATE, NYSE:FLUT) + 24px bold entity name + HQ/market count subtitle + period selector + EUR badge + Compare button.
-- CD2 primary KPI scorecard — 4 large tiles, big numbers, YoY chip, sparkline, source label, Beacon™ left border when applicable.
-- CD3 secondary KPI row — up to 8 small single-line tiles.
-- CD4 dedicated Stock Row module (listed entities only): ticker + price + day change (abs + %), 30-day sparkline, market cap / EV·EBITDA / P/E in three mini-stat boxes. Pulled from a new `getStockSnapshot(entityId)` helper.
-- CD5 two-column body: revenue chart (60%) + stacked Forecast & Strategy / Investment View narrative cards (40%).
-- CD6 quarterly breakdown table — last 6 periods, columns Period / Revenue / YoY / QoQ / EBITDA Margin / Active Users / Source / Confidence. Beacon™ rows styled amber.
-- CD7 source-reports strip — horizontal chips with file icon + filename + date, one click → PDF overlay.
+```sql
+-- analyst_note reports
+SELECT r.id, r.filename, r.parse_status, r.metric_count, r.published_timestamp
+FROM reports r
+JOIN sources s ON s.id = r.source_id
+WHERE s.source_type = 'analyst_note'
+ORDER BY r.published_timestamp DESC;
 
-### Market detail
-- MD1 operators-in-market leaderboard capped at 15 with "View all →" link.
-- MD2 Regulatory Filings module (regulator-linked reports for this market) paired with tax-history table in a 1/3 + 2/3 grid.
+-- metric_values attributed to analyst_note
+SELECT COUNT(*) FROM metric_values
+WHERE source_id = (SELECT id FROM sources WHERE source_type = 'analyst_note');
 
-### Reports
-- R1 filter chips (one per document-type with live counts), Newest/Oldest sort toggle, tighter row height (`py-1`).
+-- ingestion audit
+SELECT message_id, sender_email, subject, status, ingested_at
+FROM gmail_ingested_messages
+ORDER BY ingested_at DESC;
+```
 
-### /companies/compare
-- Full rebuild: side-by-side header strip adapting to pair vs 3-6; primary-KPI grid with per-company value/YoY/sparkline; `Δ A − B` column surfaces when exactly two companies are picked (monetary in EUR, pct in pp); revenue + EBITDA-margin overlay charts; per-metric quarterly tables restricted to the 8 headline metrics.
+Gmail check: the labelled email should have `Trailblaze-Ingest` removed and
+`Trailblaze-Ingested` applied. A second `trailblaze-scrape-gmail` invocation
+should show `skipped_duplicate` for that message (idempotency).
 
-## Data quality snapshot (live DB)
+## What shipped this session
 
-| Table | Rows |
-|---|---|
-| reports | 307 (4 clean, 285 warnings, 18 shells) |
-| entities | 319 total — **275 `auto_added_needs_review`** |
-| markets | 74 |
-| metrics | 61 |
-| periods | 290 |
-| metric_values | 6,997 |
-| narratives | 2,658 |
-| beacon_estimates | 0 |
-| fx_rates | 224,718 |
+### Step 1 — dependencies
+- `pyproject.toml` updated with `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`, `fpdf2`.
+- **Pivoted off WeasyPrint** — it requires GTK/Pango DLLs that aren't present on this Windows box (would have required MSYS2 install, not suitable for unattended). `fpdf2` is pure-Python, produces PDFs whose text extracts cleanly via `pypdf` (verified via round-trip), and preserves the analyst header + pipe-separated tables the parser needs.
+- New CLI entry point: `trailblaze-scrape-gmail`.
 
-- Operator-level rows (entity+market): 2,996 — almost all from NJ DGE
-- Stock API live: 23 tickers with price, 21 with market cap, 12 with P/E, 23 with EV/EBITDA
-- Regulator rows: 118 (NJ only; PA/MI/CT/IL all `broken_needs_research`)
+### Step 2 — schema
+- Alembic migration `0003_gmail_ingest.py`:
+  - Widens `sources.source_type` check constraint to include `'analyst_note'`.
+  - Creates `gmail_ingested_messages` table (message_id PK, status-constrained audit trail, FK to `reports.id` with `ON DELETE SET NULL`).
+- `GmailIngestedMessage` ORM model added to `src/trailblaze/db/models.py`.
+- `src/trailblaze/seed/_data/sources.py` now seeds the `analyst_note` row (`confidence_tier='verified'`, `is_proprietary=true`).
+- Migration applied + seed re-run verified: `SELECT * FROM sources WHERE source_type='analyst_note'` returns the row.
 
-## Routes verified
+### Step 3 — new table (covered by Step 2)
 
-All returned HTTP 200 in dev with no server-side errors in the log after the SQL fixes landed:
+### Step 4 — Gmail client
+- `src/trailblaze/scrapers/gmail/client.py`
+  - `build_gmail_service()` — loads OAuth credentials, runs interactive flow on first call, refreshes token silently on subsequent calls.
+  - `ensure_labels_exist()` / `add_label()` / `remove_label()` — idempotent label management.
+  - `list_labeled_messages()` — paged listing by label.
+  - `get_message()` — returns a normalised `ParsedMessage` dataclass (sender email lowercased, subject, received_at, HTML + plain-text bodies, label IDs).
 
-- `/`
-- `/markets` · `/markets/us-new-jersey` · `/markets/us-pennsylvania`
-- `/companies` · `/companies/flutter-entertainment` · `/companies/draftkings`
-- `/companies/compare` · `/companies/compare?slugs=flutter-entertainment,draftkings`
-- `/operators`
-- `/reports`
-- `/methodology`
+### Step 5 — rendering
+- `src/trailblaze/scrapers/gmail/render.py`
+  - `html_to_text()` — BeautifulSoup flatten with in-situ table rendering as pipe-separated columns so the parser's tabular heuristics still fire.
+  - `render_email_to_pdf()` — fpdf2 Letter PDF with a bold `ANALYST NOTE` header block (From / Date / Subject), horizontal rule, then monospace body. Latin-1 fixups map em-dashes / smart quotes / euro sign / nbsp so the core font can render them.
+  - `suggested_filename()` — `gmail_{sender_local}_{YYYYMMDD}_{subject_slug}.pdf`.
 
-## Commits (this session, chronological)
+### Step 6 — orchestrator
+- `src/trailblaze/scrapers/gmail/ingest.py`
+  - `ingest_labeled_emails(dry_run, limit, force)` — main entry point.
+  - Idempotency check (`gmail_ingested_messages.message_id`, status='ingested').
+  - Sender allowlist gate (case-insensitive match against `TRUSTED_SENDERS`).
+  - Renders → writes PDF → hands off to `parse_pdf()`.
+  - `_retarget_to_analyst_note()` — UPDATEs `reports.source_id` + every `metric_values.source_id` for the report, flipping from `trailblaze_pdf` → `analyst_note`. This sidesteps modifying the parser itself; the retarget lives in its own session/transaction.
+  - Error handling applies `Trailblaze-Error` label and records the exception string in `gmail_ingested_messages.error_message`.
+  - Label FSM: success ⇒ `Trailblaze-Ingest` off + `Trailblaze-Ingested` on; rejection ⇒ `Trailblaze-Ingest` off + `Trailblaze-Rejected-Sender` on; error ⇒ `Trailblaze-Error` on (ingest label stays so user can retry).
 
-- `f08dadb` — G1-G3 globals + Overview polish
-- `ac96843` — Markets / Companies / Operators polish
-- `10e2330` — Company detail / Market detail / Reports polish
-- `240ac34` — SQL fixes (ORDER BY alias, eur_rate numeric, metadata column)
-- `dd90655` — Companies compare rebuild (side-by-side grid + Δ A−B)
-- `8026933` — Session summary doc
-- `448e574` — Opt pass 1: hide auto_added_needs_review entities default + toggle
-- `7d8d881` — Opt passes 2-3: Market detail chart + /markets/compare rebuild
-- `7e58cb1` — Opt passes 4-5: saturated heatmap palette + period-selector pill-group
-- `ed2251e` — Heatmap sort: priced first, unpriced tail
+### Step 7 — CLI
+- `src/trailblaze/scrapers/cli_gmail.py` — `trailblaze-scrape-gmail` with `--dry-run`, `--limit N`, `--force`, `-v`.
+- Registered in `pyproject.toml` under `[project.scripts]`.
 
-## Companion docs created
+### Step 8 — docs
+- `SCRAPERS_STATUS.md` gains a top-of-file "Gmail analyst-note ingest (production)" section with module inventory, trusted senders list, label semantics, and operational notes.
 
-- `CTO_REVIEW.md` — spec-conformance matrix, data-pipeline health, 5-pass plan
-- `SESSION_SUMMARY.md` — this file
+### Step 9 — pre-OAuth smoke test (what I could verify without consent)
+- `trailblaze-scrape-gmail --help` registers cleanly and shows expected flags.
+- All modules import without errors.
+- Synthetic end-to-end (bypassing Gmail entirely): rendered a fake analyst email via `render_email_to_pdf()`, wrote it to `pdfs/`, parsed it via `parse_pdf()`, retargeted the source, recorded an audit row, verified the source flipped from `trailblaze_pdf` → `analyst_note` in both `reports` and `metric_values`. Cleaned up the synthetic artifacts after verification.
 
-## Deferred items
+## Design choices worth noting
 
-None from the original brief — all G1-G3, O1-O3, M1-M3, C1-C3, OP1-OP3, CD1-CD7, MD1-MD2, R1 items landed.
+1. **Post-parse source retarget vs parser-source-override.** Chose to do an UPDATE on `reports.source_id` + `metric_values.source_id` after `parse_pdf` returns rather than threading a `source_id` parameter through the parser. Keeps the parser module totally untouched; cost is one extra UPDATE per email (cheap).
 
-**Known data gaps (out of this session's scope):**
-- 275 auto-added entities need curation — many show up in leaderboards alongside canonical entities. Will propose a default filter in the optimization pass.
-- 4/5 US regulators broken (PA/MI/CT/IL). T3 responsibility, not T2.
-- Beacon™ engine: no estimates in DB. Visual treatment is wired and degrades gracefully (em-dash, 0% auto-hidden).
-- Parse-status distribution: 285/307 reports have warnings. Parser Category B still pending.
+2. **Idempotency layers.**
+   - `gmail_ingested_messages.message_id` PK — short-circuits before any parse work if a message already has `status='ingested'`.
+   - Parser's existing `reports.file_hash` unique constraint — second safety net. Re-rendering the same email produces the same PDF bytes (deterministic fpdf2), so `file_hash` catches any case where the orchestrator accidentally re-processes.
+   - `--force` skips the first layer; the second still protects.
 
-## Morning screenshot checklist
+3. **fpdf2 vs weasyprint.** WeasyPrint's richer HTML/CSS was attractive but the Windows GTK dependency is a non-starter for unattended setup. fpdf2 + flatten-tables-to-text renders in <5ms, no external deps, and the parser only reads text anyway.
 
-To verify visually:
-- `/` — ticker strip scrolls; Markets leaderboard + Recent Reports + Data Drops + Operators tab + 3-module bottom row should all fit in 1080p without scroll
-- `/markets` — "Showing N of M markets" helper visible; filter chip active state blue
-- `/companies` — 4-tile aggregate scorecard at top; chip colors differ by entity type in the leaderboard rows
-- `/operators` — heatmap shows 20+ tiles sized by market cap; leaderboard rightmost column shows PRICE / DAY% / MARKET CAP / EV·EBITDA
-- `/companies/flutter-entertainment` — chip row (OPERATOR · LISTED · NYSE:FLUT), 4-tile primary, 8-tile secondary, Stock Row module, revenue chart + Forecast / Investment View, quarterly table, source chips
-- `/markets/us-new-jersey` — operators leaderboard capped at 15, Regulatory Filings module present
-- `/reports` — filter chips show document-type counts
-- `/companies/compare?slugs=flutter-entertainment,draftkings` — side-by-side KPI grid with Δ A−B column
+4. **Labels stay on errored messages.** `Trailblaze-Ingest` is *not* removed when ingestion errors — the user can fix the root cause (e.g. curate a new entity, fix parser) and re-run without having to relabel the email manually.
+
+## Deferred (per brief's "out of scope")
+
+- No cron / Task Scheduler wiring — user runs manually.
+- No attachment support — body only.
+- No parser tuning for email-specific content — will surface as warnings / shell parses on real messages; a follow-up brief can inspect warnings once there's data.
+- No UI for trusted-sender management — hardcoded in `config.py`.
+
+## SESSION_DEFERRED.md
+
+Not created. No in-session work was deferred aside from the OAuth-gated live test, which is covered above with explicit next steps.
+
+## Exact next step for the user
+
+1. Run `trailblaze-scrape-gmail --dry-run` to trigger OAuth consent; click Allow in the browser.
+2. In Gmail, apply the `Trailblaze-Ingest` label to a real Oyvind email (FDJ UNITED Q1-26 if available).
+3. Run `trailblaze-scrape-gmail -v`.
+4. Paste the verification SQL output + CLI summary into chat; I'll triage any parser warnings specific to email content.
