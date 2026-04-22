@@ -4,7 +4,42 @@ Single source of truth for which scrapers run by default, which are scaffolded, 
 
 Default `trailblaze-scrape-regulators` / `trailblaze-scrape-stocks` / `trailblaze-scrape-companies` only run `production` scrapers. Pass `--include-scaffolded` (or `--only <name>`) to run others.
 
-Last updated: 2026-04-21 (post-T3).
+Last updated: 2026-04-22 (post-T3-Gmail).
+
+---
+
+## Gmail analyst-note ingest (production)
+
+**`trailblaze-scrape-gmail`** — pulls emails labeled `Trailblaze-Ingest`, renders each to a synthetic PDF (analyst-note header + flattened body w/ preserved tables), and hands off to the existing `trailblaze-parse` pipeline. First run opens an OAuth consent screen; token is cached in `secrets/gmail_token.json`.
+
+| Component | Status | Notes |
+|---|---|---|
+| `src/trailblaze/scrapers/gmail/client.py` (OAuth + Gmail API) | **production** | scope `gmail.modify` — required to relabel |
+| `src/trailblaze/scrapers/gmail/render.py` (email → PDF) | **production** | pure-Python (`fpdf2`); tables flattened to pipe-separated text to keep the parser's tabular heuristics intact |
+| `src/trailblaze/scrapers/gmail/ingest.py` (orchestrator) | **production** | idempotent via `gmail_ingested_messages.message_id`; retargets `source_id` → `analyst_note` post-parse |
+
+### Trusted senders (allowlist)
+
+Edit `src/trailblaze/scrapers/gmail/config.py:TRUSTED_SENDERS` to add analysts. Current list:
+
+- `oyvindmiller@gmail.com`
+
+Emails labeled `Trailblaze-Ingest` from any other sender are logged as `status='rejected_sender'` in `gmail_ingested_messages`, tagged `Trailblaze-Rejected-Sender` in Gmail, and skipped.
+
+### Labels the pipeline manages
+
+| Label | Direction | Meaning |
+|---|---|---|
+| `Trailblaze-Ingest` | user applies, pipeline removes | "process this email" |
+| `Trailblaze-Ingested` | pipeline applies on success | parsed + metric_values populated |
+| `Trailblaze-Rejected-Sender` | pipeline applies on allowlist miss | untrusted sender; ingest label cleared |
+| `Trailblaze-Error` | pipeline applies on exception | ingest label stays so user can retry |
+
+### Operational notes
+
+- **Not part of the default `trailblaze-scrape-*` batch** — Gmail requires an interactive OAuth consent on first run and a separate trust model, so it's a dedicated CLI invoked manually (or by Task Scheduler once the token is cached).
+- Synthetic PDFs land in `pdfs/gmail_{sender}_{date}_{subject}.pdf` and are parsed by the same deterministic pipeline that handles Trailblaze reports. Parser file-hash dedupe still protects against double-ingests even if `--force` is used.
+- `source_type='analyst_note'` (confidence tier `verified`, is_proprietary) is injected into both the `reports` row and every `metric_values` row produced from the email.
 
 ---
 
