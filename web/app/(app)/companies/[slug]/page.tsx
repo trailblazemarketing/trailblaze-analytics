@@ -17,7 +17,12 @@ import {
   groupPeriodsForSelector,
 } from "@/lib/queries/periods";
 import { adaptEntityLeaderboardRows } from "@/lib/adapters";
-import { buildPanelTiles, PANELS, type PanelKind } from "@/lib/scorecard-builder";
+import {
+  buildPanelTiles,
+  PANELS,
+  type PanelKind,
+  augmentDerivedEbitdaMargin,
+} from "@/lib/scorecard-builder";
 import { Leaderboard } from "@/components/primitives/leaderboard";
 import { TimeMatrix } from "@/components/primitives/time-matrix";
 import type {
@@ -171,9 +176,17 @@ export default async function CompanyDetailPage({
   );
   const recentPeriods = entityPeriodRows;
 
+  // T2 small-fix 2: augment byCode with derived ebitda_margin rows where
+  // disclosed values are missing but ebitda + revenue both exist. All
+  // downstream consumers (primary tile, quarterly table) read through this.
+  const byCodeAug = augmentDerivedEbitdaMargin(byCode);
+
   const allBeaconIds: string[] = [];
-  byCode.forEach((rows) => {
+  byCodeAug.forEach((rows) => {
     for (const r of rows) {
+      // Derived rows synthesised above have synthetic IDs; skip them here
+      // so we don't join against beacon_estimates for a non-existent row.
+      if (r.metric_value_id.startsWith("derived:")) continue;
       if (
         r.disclosure_status === "beacon_estimate" ||
         r.disclosure_status === "derived"
@@ -182,11 +195,11 @@ export default async function CompanyDetailPage({
     }
   });
   const beacon = await getBeaconEstimatesForValues(allBeaconIds);
-  const tiles = buildPanelTiles(kind, byCode, beacon);
+  const tiles = buildPanelTiles(kind, byCodeAug, beacon);
 
   // CD5: Revenue chart — quarterly, last 12 periods, solid blue for
   // disclosed + dotted amber for Beacon™. Prefer quarter-bucket periods.
-  const revRows = byCode.get("revenue") ?? [];
+  const revRows = byCodeAug.get("revenue") ?? [];
   const sortedRev = [...revRows].sort((a, b) =>
     a.period_start.localeCompare(b.period_start),
   );
@@ -251,14 +264,15 @@ export default async function CompanyDetailPage({
         ? ((revEur - prevQEur) / Math.abs(prevQEur)) * 100
         : null;
 
-    const marginRow = (byCode.get("ebitda_margin") ?? []).find(
+    const marginRow = (byCodeAug.get("ebitda_margin") ?? []).find(
       (r) => r.period_code === pRow.period_code,
     );
-    const actUsersRow = (byCode.get("active_customers") ?? []).find(
+    const actUsersRow = (byCodeAug.get("active_customers") ?? []).find(
       (r) => r.period_code === pRow.period_code,
     );
     const margin =
       marginRow?.value_numeric != null ? Number(marginRow.value_numeric) : null;
+    const marginDerived = marginRow?.disclosure_status === "derived";
     const actUsers =
       actUsersRow != null
         ? toRawNumeric(actUsersRow.value_numeric, actUsersRow.unit_multiplier)
@@ -278,6 +292,7 @@ export default async function CompanyDetailPage({
       yoy,
       qoq,
       margin: margin != null ? `${margin.toFixed(1)}%` : "—",
+      marginDerived,
       actUsers: actUsers != null ? abbreviate(actUsers) : "—",
       source: pRow.source_type,
       confidence:
@@ -500,7 +515,14 @@ export default async function CompanyDetailPage({
         </div>
       </header>
 
-      {/* CD2: Primary KPI scorecard — 4 large tiles */}
+      {/* CD2: Primary KPI scorecard — 4 large tiles.
+          T2 small-fix 3: operator panel swaps the last two recipe tiles
+          (Active Users + ARPU — which moved to secondary) for custom
+          Market Cap + Stock Price tiles driven by the live stock snapshot.
+          Private (ticker-less) operators render the PRIVATE fallback so
+          prime real estate is not wasted on em-dashes. Other panel kinds
+          (affiliate / b2b_* / lottery / dfs) keep their existing primary
+          layout since their non-stock metrics are more informative. */}
       <div className="grid grid-cols-1 gap-px overflow-hidden rounded-md border border-tb-border bg-tb-border sm:grid-cols-2 lg:grid-cols-4">
         {primaryTiles.map((t) => (
           <PrimaryKpiTile
@@ -515,6 +537,18 @@ export default async function CompanyDetailPage({
             tooltip={t.nativeTooltip}
           />
         ))}
+        {kind === "operator" && (
+          <>
+            <MarketCapTile
+              ticker={company.ticker}
+              snapshot={stockSnapshot}
+            />
+            <StockPriceTile
+              ticker={company.ticker}
+              snapshot={stockSnapshot}
+            />
+          </>
+        )}
       </div>
 
       {/* CD3: Secondary KPI row — 8 smaller single-line tiles */}
@@ -526,10 +560,8 @@ export default async function CompanyDetailPage({
               label={t.label}
               value={t.valueFormatted}
               yoy={t.yoy}
-              beacon={
-                t.disclosureStatus === "beacon_estimate" ||
-                t.disclosureStatus === "derived"
-              }
+              beacon={t.disclosureStatus === "beacon_estimate"}
+              derived={t.disclosureStatus === "derived"}
             />
           ))}
         </div>
@@ -636,7 +668,17 @@ export default async function CompanyDetailPage({
                 <TD className="text-right">
                   <DeltaChip pct={r.qoq} size="xs" />
                 </TD>
-                <TD className="text-right font-mono">{r.margin}</TD>
+                <TD className="text-right font-mono">
+                  {r.margin}
+                  {r.marginDerived && r.margin !== "—" && (
+                    <span
+                      className="ml-1 rounded border border-tb-border px-1 text-[8px] uppercase tracking-wider text-tb-muted"
+                      title="Derived from disclosed EBITDA ÷ Revenue (same period)"
+                    >
+                      D
+                    </span>
+                  )}
+                </TD>
                 <TD className="text-right font-mono">{r.actUsers}</TD>
                 <TD>
                   <SourceLabel source={r.source} />
@@ -744,13 +786,17 @@ function PrimaryKpiTile({
   disclosureStatus?: import("@/lib/types").DisclosureStatus;
   tooltip?: string | null;
 }) {
-  const isBeacon =
-    disclosureStatus === "beacon_estimate" || disclosureStatus === "derived";
+  const isBeacon = disclosureStatus === "beacon_estimate";
+  const isDerived = disclosureStatus === "derived";
   return (
     <div
       className={
         "flex flex-col justify-between gap-1 bg-tb-surface px-4 py-3 " +
-        (isBeacon ? "border-l-2 border-l-tb-beacon" : "")
+        (isBeacon
+          ? "border-l-2 border-l-tb-beacon"
+          : isDerived
+          ? "border-l-2 border-l-tb-border"
+          : "")
       }
     >
       <span className="text-[10px] uppercase tracking-wider text-tb-muted">
@@ -766,6 +812,14 @@ function PrimaryKpiTile({
           {value ?? "—"}
         </span>
         {isBeacon && value && <sup className="beacon-tm">™</sup>}
+        {isDerived && value && (
+          <span
+            className="rounded border border-tb-border px-1 text-[8px] uppercase tracking-wider text-tb-muted"
+            title="Derived from disclosed inputs (EBITDA ÷ Revenue)"
+          >
+            Derived
+          </span>
+        )}
       </div>
       <div className="flex items-center justify-between">
         <DeltaChip pct={yoy ?? null} />
@@ -787,22 +841,120 @@ function PrimaryKpiTile({
   );
 }
 
+// T2 small-fix 3: custom Market Cap + Stock Price tiles for the operator
+// primary scorecard. Use the same visual shell as PrimaryKpiTile so the
+// scorecard reads uniformly. Private (no ticker) entities get a PRIVATE
+// badge and em-dash value instead of wasted blank real estate.
+
+function MarketCapTile({
+  ticker,
+  snapshot,
+}: {
+  ticker: string | null;
+  snapshot: StockSnap | null;
+}) {
+  const isPrivate = !ticker;
+  const mc = snapshot?.market_cap_eur ?? null;
+  return (
+    <div className="flex flex-col justify-between gap-1 bg-tb-surface px-4 py-3">
+      <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-tb-muted">
+        Market cap
+        {isPrivate && (
+          <span
+            className="rounded border border-tb-border px-1 text-[8px] uppercase tracking-wider text-tb-muted"
+            title="Private entity — no listed equity"
+          >
+            Private
+          </span>
+        )}
+      </span>
+      <div className="flex items-baseline gap-1.5">
+        <span
+          className={
+            "font-mono text-2xl font-semibold " +
+            (mc != null ? "text-tb-text" : "text-tb-muted")
+          }
+        >
+          {mc != null ? formatEur(mc) : "—"}
+        </span>
+      </div>
+      <div className="text-[10px] text-tb-muted">
+        {isPrivate ? "Unlisted" : snapshot ? "EUR-converted" : "—"}
+      </div>
+    </div>
+  );
+}
+
+function StockPriceTile({
+  ticker,
+  snapshot,
+}: {
+  ticker: string | null;
+  snapshot: StockSnap | null;
+}) {
+  const isPrivate = !ticker;
+  const price = snapshot?.latest_price ?? null;
+  const ccy = snapshot?.currency ?? null;
+  const dcp = snapshot?.day_change_pct ?? null;
+  return (
+    <div className="flex flex-col justify-between gap-1 bg-tb-surface px-4 py-3">
+      <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-tb-muted">
+        Stock price
+        {isPrivate && (
+          <span
+            className="rounded border border-tb-border px-1 text-[8px] uppercase tracking-wider text-tb-muted"
+            title="Private entity — no traded stock"
+          >
+            Private
+          </span>
+        )}
+      </span>
+      <div className="flex items-baseline gap-1.5">
+        <span
+          className={
+            "font-mono text-2xl font-semibold " +
+            (price != null ? "text-tb-text" : "text-tb-muted")
+          }
+        >
+          {price != null
+            ? ccy
+              ? formatNative(price, ccy)
+              : price.toFixed(2)
+            : "—"}
+        </span>
+      </div>
+      <div className="flex items-center justify-between">
+        <DeltaChip pct={dcp} />
+        {ticker && (
+          <span className="font-mono text-[10px] text-tb-muted">{ticker}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SecondaryKpiTile({
   label,
   value,
   yoy,
   beacon,
+  derived,
 }: {
   label: string;
   value: string | null;
   yoy: number | null | undefined;
   beacon: boolean;
+  derived?: boolean;
 }) {
   return (
     <div
       className={
         "flex flex-col justify-between gap-0.5 bg-tb-surface px-3 py-2 " +
-        (beacon ? "border-l-2 border-l-tb-beacon" : "")
+        (beacon
+          ? "border-l-2 border-l-tb-beacon"
+          : derived
+          ? "border-l-2 border-l-tb-border"
+          : "")
       }
     >
       <span className="truncate text-[9px] uppercase tracking-wider text-tb-muted">
@@ -811,6 +963,14 @@ function SecondaryKpiTile({
       <span className="truncate font-mono text-sm font-semibold text-tb-text">
         {value ?? "—"}
         {beacon && value && <sup className="beacon-tm text-[8px]">™</sup>}
+        {derived && value && (
+          <span
+            className="ml-1 text-[7px] uppercase tracking-wider text-tb-muted"
+            title="Derived from disclosed inputs"
+          >
+            D
+          </span>
+        )}
       </span>
       <DeltaChip pct={yoy ?? null} size="xs" />
     </div>

@@ -19,13 +19,17 @@ import type {
 // UI_SPEC_2 Panel definitions — metric code → label + unit hint.
 export const PANELS = {
   operator: {
+    // T2 small-fix 3: operator primary is now Revenue / EBITDA Margin plus
+    // two custom stock-snapshot tiles rendered by the Company detail page
+    // (Market Cap + Stock Price). Active Users + ARPU moved to secondary so
+    // they still appear in the 8-tile row when the entity reports them.
     primary: [
       { code: "revenue", label: "Total Revenue" },
       { code: "ebitda_margin", label: "EBITDA Margin" },
-      { code: "active_customers", label: "Active Users" },
-      { code: "arpu", label: "ARPU" },
     ],
     secondary: [
+      { code: "active_customers", label: "Active Users" },
+      { code: "arpu", label: "ARPU" },
       { code: "ftd", label: "FTDs" },
       { code: "marketing_pct_revenue", label: "Marketing % Rev" },
       { code: "online_revenue", label: "Online Rev" },
@@ -241,6 +245,92 @@ function unitHint(u: UnitType): string | null {
   if (u === "count") return "#";
   if (u === "ratio") return "×";
   return null;
+}
+
+// T2 small-fix 2: derive EBITDA margin from ebitda + revenue when no
+// disclosed margin row exists for a period. The computed value carries
+// disclosure_status='derived' (not 'beacon_estimate' — Beacon™ is reserved
+// for the estimate engine). Render treatment is the caller's concern —
+// this function only materializes the row into the byCode map so every
+// downstream reader (primary tile, quarterly table, sparkline) sees it.
+function deriveMarginForPeriod(
+  periodCode: string,
+  byCode: Map<string, CanonicalRow[]>,
+): CanonicalRow | null {
+  const ebitdaRow = (byCode.get("ebitda") ?? []).find(
+    (r) => r.period_code === periodCode,
+  );
+  const revRow = (byCode.get("revenue") ?? []).find(
+    (r) => r.period_code === periodCode,
+  );
+  if (!ebitdaRow || !revRow) return null;
+  // Require both sides to be real disclosed values. Partially_disclosed is
+  // still source-of-truth. Beacon™ / not_disclosed are rejected so we don't
+  // present a model-implied ratio as derived.
+  const okDisclose = (s: string | null) =>
+    s === "disclosed" || s === "partially_disclosed";
+  if (!okDisclose(ebitdaRow.disclosure_status)) return null;
+  if (!okDisclose(revRow.disclosure_status)) return null;
+  if (ebitdaRow.value_numeric == null || revRow.value_numeric == null) return null;
+
+  const ebitdaEur = nativeToEur(
+    ebitdaRow.value_numeric,
+    ebitdaRow.unit_multiplier,
+    ebitdaRow.eur_rate,
+  );
+  const revEur = nativeToEur(
+    revRow.value_numeric,
+    revRow.unit_multiplier,
+    revRow.eur_rate,
+  );
+  if (ebitdaEur == null || revEur == null) return null;
+  if (Math.abs(revEur) < 1) return null; // guard near-zero
+  const pct = (ebitdaEur / revEur) * 100;
+  if (!Number.isFinite(pct)) return null;
+  if (Math.abs(pct) > 200) return null; // outlier / unit mismatch guard
+
+  return {
+    ...ebitdaRow,
+    metric_value_id: `derived:ebitda_margin:${periodCode}:${ebitdaRow.entity_id ?? ebitdaRow.market_id}`,
+    metric_id: "derived",
+    metric_code: "ebitda_margin",
+    metric_display_name: "EBITDA Margin (derived)",
+    metric_unit_type: "percentage",
+    value_numeric: pct.toFixed(4),
+    unit_multiplier: null,
+    currency: null,
+    disclosure_status: "derived",
+    confidence_score: null,
+    eur_rate: null,
+  };
+}
+
+// For every period in which ebitda_margin has no disclosed row but ebitda +
+// revenue both do, insert a derived CanonicalRow into the map. Returns a
+// new map; the original is not mutated.
+export function augmentDerivedEbitdaMargin(
+  byCode: Map<string, CanonicalRow[]>,
+): Map<string, CanonicalRow[]> {
+  const marginRows = byCode.get("ebitda_margin") ?? [];
+  const havePeriods = new Set(
+    marginRows
+      .filter((r) => r.value_numeric != null)
+      .map((r) => r.period_code),
+  );
+  const ebitdaRows = byCode.get("ebitda") ?? [];
+  const additions: CanonicalRow[] = [];
+  for (const er of ebitdaRows) {
+    if (havePeriods.has(er.period_code)) continue;
+    const derived = deriveMarginForPeriod(er.period_code, byCode);
+    if (derived) additions.push(derived);
+  }
+  if (additions.length === 0) return byCode;
+  const next = new Map(byCode);
+  const combined = [...marginRows, ...additions].sort((a, b) =>
+    b.period_start.localeCompare(a.period_start),
+  );
+  next.set("ebitda_margin", combined);
+  return next;
 }
 
 // Filter: a panel tile is shown only if we have >=1 row of data (not all null).

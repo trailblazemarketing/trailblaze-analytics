@@ -10,6 +10,7 @@ import {
   Legend,
   ReferenceDot,
 } from "recharts";
+import { formatEur } from "@/lib/format";
 
 export type TimeseriesPoint = {
   period: string;
@@ -20,6 +21,14 @@ export type TimeseriesPoint = {
 export type BeaconFlags = {
   [seriesKey: string]: Set<string>; // period codes where the value is beacon
 };
+
+// Default Y-axis / tooltip formatter — EUR-compact (€3.6B, €247.2M, €812K).
+// Callers override via `valueFormatter` to switch currency or unit (e.g. %).
+function defaultFormatter(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return formatEur(n);
+}
 
 const PALETTE = [
   "#2BA8E0", // tb-blue
@@ -40,12 +49,16 @@ export function MetricTimeseries({
   beaconFlags,
   height = 280,
   yLabel,
+  valueFormatter = defaultFormatter,
 }: {
   data: TimeseriesPoint[];
   series: { key: string; label: string }[];
   beaconFlags?: BeaconFlags;
   height?: number;
   yLabel?: string;
+  // T2 small-fix 1: currency-aware Y-axis + tooltip formatter. Default is
+  // EUR-compact (€3.6B); callers pass a custom formatter for pct/USD/etc.
+  valueFormatter?: (v: unknown) => string;
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -61,6 +74,8 @@ export function MetricTimeseries({
           tick={{ fill: "var(--tb-text-muted)", fontSize: 10, fontFamily: "JetBrains Mono" }}
           axisLine={{ stroke: "var(--tb-border)" }}
           tickLine={false}
+          tickFormatter={valueFormatter}
+          width={62}
           label={
             yLabel
               ? {
@@ -93,7 +108,7 @@ export function MetricTimeseries({
             const isBeacon =
               key && periodCode && beaconFlags?.[key]?.has(periodCode);
             return [
-              `${value}${isBeacon ? " ™" : ""}`,
+              `${valueFormatter(value)}${isBeacon ? " ™" : ""}`,
               name,
             ];
           }}
