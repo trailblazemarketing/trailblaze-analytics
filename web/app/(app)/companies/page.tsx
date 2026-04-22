@@ -14,6 +14,10 @@ import { Leaderboard } from "@/components/primitives/leaderboard";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { Input } from "@/components/ui/input";
 import { formatEur } from "@/lib/format";
+import {
+  CompanyTreemap,
+  type TreemapCell,
+} from "@/components/charts/company-treemap";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +106,7 @@ export default async function CompaniesIndexPage({
         </div>
       </header>
 
-      {/* C1: Aggregate KPI strip — 4 tiles */}
+      {/* C1: Aggregate KPI strip — 4 primary tiles */}
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-tb-border bg-tb-border md:grid-cols-4">
         <KpiAggTile
           label="Total tracked companies"
@@ -126,6 +130,46 @@ export default async function CompaniesIndexPage({
           label="Listed vs private"
           value={`${kpis.listed} · ${kpis.private_count}`}
           hint={`${kpis.listed} listed · ${kpis.private_count} private`}
+        />
+      </div>
+
+      {/* C2: Industry snapshot — 4 secondary tiles, smaller visual weight */}
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-tb-border bg-tb-border md:grid-cols-4">
+        <KpiAggTile
+          small
+          label="Total active customers"
+          value={
+            kpis.total_active_customers != null
+              ? abbreviate(kpis.total_active_customers)
+              : "—"
+          }
+          hint="Sum of latest-period disclosed active customers"
+        />
+        <KpiAggTile
+          small
+          label="Blended ARPU"
+          value={
+            kpis.blended_arpu_eur != null
+              ? formatEur(kpis.blended_arpu_eur)
+              : "—"
+          }
+          hint="Revenue ÷ active customers, weighted"
+        />
+        <KpiAggTile
+          small
+          label="Top-5 revenue concentration"
+          value={
+            kpis.top5_concentration_pct != null
+              ? `${kpis.top5_concentration_pct.toFixed(1)}%`
+              : "—"
+          }
+          hint="Share of revenue held by the 5 largest companies"
+        />
+        <KpiAggTile
+          small
+          label="Companies reporting this period"
+          value={kpis.companies_reporting.toLocaleString()}
+          hint="Entities with metric_values in the latest period"
         />
       </div>
 
@@ -215,6 +259,38 @@ export default async function CompaniesIndexPage({
         )}
       </form>
 
+      {/* C3: Revenue treemap — sized by revenue (EUR), colored by entity type.
+          Only meaningful when the selected metric is currency-typed; skipped
+          for counts like active users. */}
+      {metric.code === "revenue" && lb.rows.some((r) => (r.value ?? 0) > 0) && (
+        <div className="rounded-md border border-tb-border bg-tb-surface">
+          <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+            <div>
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                Revenue treemap — sized by revenue · colored by type
+              </h3>
+              <p className="mt-0.5 text-[10px] text-tb-muted">
+                OP blue · B2B stone · AFF green · LOT violet · DFS amber
+              </p>
+            </div>
+            <span className="font-mono text-[10px] text-tb-muted">EUR</span>
+          </div>
+          <CompanyTreemap
+            cells={lb.rows.slice(0, 40).map(
+              (r): TreemapCell => ({
+                id: r.id,
+                name: r.name,
+                slug: r.href?.split("/").pop() ?? r.id,
+                value: r.value,
+                typeCode: r.typeChip ?? null,
+                ticker: r.ticker ?? null,
+                disclosureStatus: r.disclosureStatus,
+              }),
+            )}
+          />
+        </div>
+      )}
+
       <Leaderboard
         title={`Companies — ${metric.label}`}
         subtitle={
@@ -244,22 +320,56 @@ function KpiAggTile({
   label,
   value,
   hint,
+  small,
 }: {
   label: string;
   value: string;
   hint?: string;
+  small?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1 bg-tb-surface px-4 py-3">
-      <span className="text-[10px] uppercase tracking-wider text-tb-muted">
+    <div
+      className={
+        "flex flex-col gap-1 bg-tb-surface " +
+        (small ? "px-3 py-2" : "px-4 py-3")
+      }
+    >
+      <span
+        className={
+          "uppercase tracking-wider text-tb-muted " +
+          (small ? "text-[9px]" : "text-[10px]")
+        }
+      >
         {label}
       </span>
-      <span className="font-mono text-lg font-semibold text-tb-text">
+      <span
+        className={
+          "font-mono font-semibold text-tb-text " +
+          (small ? "text-sm" : "text-lg")
+        }
+      >
         {value}
       </span>
-      {hint && <span className="text-[10px] text-tb-muted">{hint}</span>}
+      {hint && (
+        <span
+          className={
+            "text-tb-muted " + (small ? "text-[9px]" : "text-[10px]")
+          }
+        >
+          {hint}
+        </span>
+      )}
     </div>
   );
+}
+
+function abbreviate(n: number): string {
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}${abs.toFixed(0)}`;
 }
 
 function TypeChips({

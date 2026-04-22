@@ -9,13 +9,17 @@ import {
 import {
   getScorecardSeries,
   getEntityLeaderboard,
+  getMarketLeaderboard,
 } from "@/lib/queries/analytics";
 import {
   listPopulatedPeriods,
   groupPeriodsForSelector,
   mostRecentRelevantPeriod,
 } from "@/lib/queries/periods";
-import { adaptEntityLeaderboardRows } from "@/lib/adapters";
+import {
+  adaptEntityLeaderboardRows,
+  adaptMarketLeaderboardRows,
+} from "@/lib/adapters";
 import { buildPanelTiles, PANELS } from "@/lib/scorecard-builder";
 import { Scorecard } from "@/components/primitives/scorecard";
 import { Leaderboard } from "@/components/primitives/leaderboard";
@@ -153,6 +157,42 @@ export default async function MarketDetailPage({
      ORDER BY mk.name`,
     [market.id],
   );
+
+  // M5: pick a sub-markets-leaderboard metric — the one with the best coverage
+  // across this country's direct children. Falls back through a preference list.
+  const SUB_METRIC_PREF = [
+    "online_ggr",
+    "sportsbook_ggr",
+    "sportsbook_handle",
+    "casino_ggr",
+    "ggr",
+    "online_revenue",
+    "sportsbook_revenue",
+  ];
+  let subMarketMetric: string | null = null;
+  if (subMarkets.length > 0) {
+    const covRow = await query<{ metric_code: string; n: number }>(
+      `SELECT m.code AS metric_code, COUNT(DISTINCT mvc.market_id)::int AS n
+       FROM metric_value_canonical mvc
+       JOIN metrics m ON m.id = mvc.metric_id
+       JOIN markets child ON child.id = mvc.market_id
+       WHERE child.parent_market_id = $1
+         AND mvc.entity_id IS NULL
+         AND m.code = ANY($2::text[])
+       GROUP BY m.code
+       ORDER BY n DESC LIMIT 1`,
+      [market.id, SUB_METRIC_PREF],
+    );
+    subMarketMetric = covRow[0]?.metric_code ?? null;
+  }
+  const subMarketRowsRaw = subMarketMetric
+    ? await getMarketLeaderboard({
+        metricCode: subMarketMetric,
+        parentMarketId: market.id,
+        limit: 50,
+      })
+    : [];
+  const subMarketLb = adaptMarketLeaderboardRows(subMarketRowsRaw);
 
   const [byCode, reports, taxHistory, operatorsRaw, narratives, tmRowsRaw, regulatoryFilings] =
     await Promise.all([
@@ -373,11 +413,31 @@ export default async function MarketDetailPage({
         }
       />
 
-      {/* B4: Sub-markets — only when this market has direct children (e.g.
-          United States → 28 states, Canada → 2 provinces). Data is NOT
-          mixed into the parent's tables; this is a links strip only so an
-          analyst can drill into the right sub-market. */}
-      {subMarkets.length > 0 && (
+      {/* M5: Sub-markets module — when this country has direct children (US
+          → 28 states, Canada → 2 provinces), render a ranked leaderboard of
+          them against the best-covered metric. Falls back to a chip strip
+          when no metric-level data is available for any sub-market yet. */}
+      {subMarkets.length > 0 && subMarketLb.rows.length > 0 && subMarketMetric && (
+        <Leaderboard
+          title={`Sub-markets of ${market.name}`}
+          subtitle={`Ranked by ${subMarketMetric.replace(/_/g, " ")} · click a row to drill into that market`}
+          valueLabel={subMarketMetric.toUpperCase()}
+          nameLabel="Sub-market"
+          rows={subMarketLb.rows}
+          total={subMarketLb.total}
+          columns={[
+            "rank",
+            "name",
+            "value",
+            "share",
+            "yoy",
+            "sparkline",
+            "extra",
+          ]}
+          maxRows={40}
+        />
+      )}
+      {subMarkets.length > 0 && subMarketLb.rows.length === 0 && (
         <div className="rounded-md border border-tb-border bg-tb-surface">
           <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
             <div>
@@ -385,7 +445,7 @@ export default async function MarketDetailPage({
                 Sub-markets ({subMarkets.length})
               </h3>
               <p className="mt-0.5 text-[10px] text-tb-muted">
-                Direct children of {market.name} — data is reported per sub-market and not aggregated here
+                Direct children of {market.name} — no covered metric to rank yet; click to drill in
               </p>
             </div>
           </div>

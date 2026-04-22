@@ -56,6 +56,35 @@ export default async function OperatorsPage({
 
   const revenue = adaptEntityLeaderboardRows(revRaw);
 
+  // OP1 (T2 polish 3): industry snapshot computed from the heatmap universe.
+  // Kept as a derived in-memory aggregate — no extra query.
+  const listedCount = heatmap.length;
+  const combinedMcap = heatmap.reduce(
+    (s, c) => s + (c.market_cap_eur ?? 0),
+    0,
+  );
+  const evm = heatmap
+    .map((c) => c.ev_ebitda)
+    .filter((v): v is number => v != null && Number.isFinite(v));
+  const avgEvm = evm.length > 0 ? evm.reduce((s, v) => s + v, 0) / evm.length : null;
+  const priced = heatmap.filter(
+    (c) => c.day_change_pct != null && Number.isFinite(c.day_change_pct),
+  );
+  const best = priced.length
+    ? priced.reduce((a, b) =>
+        (a.day_change_pct ?? -Infinity) >= (b.day_change_pct ?? -Infinity)
+          ? a
+          : b,
+      )
+    : null;
+  const worst = priced.length
+    ? priced.reduce((a, b) =>
+        (a.day_change_pct ?? Infinity) <= (b.day_change_pct ?? Infinity)
+          ? a
+          : b,
+      )
+    : null;
+
   // OP3: join stock columns (price, day%, market cap, EV/EBITDA) onto the
   // revenue leaderboard rows using the heatmap data which already carries them.
   const byEntity = new Map(heatmap.map((h) => [h.entity_id, h]));
@@ -89,6 +118,50 @@ export default async function OperatorsPage({
         </div>
         <PeriodSelector groups={periodGroups} currentCode={periodCode} />
       </header>
+
+      {/* OP1: industry-snapshot strip — thin single row of terminal-style stats
+          mimicking a sector bar. Derived from the heatmap universe so it's
+          consistent with the tiles below. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-md border border-tb-border bg-tb-surface px-3 py-1.5 text-[10px]">
+        <StatPair
+          label="Listed operators"
+          value={listedCount.toLocaleString()}
+        />
+        <StatPair
+          label="Combined market cap"
+          value={combinedMcap > 0 ? formatEur(combinedMcap) : "—"}
+        />
+        <StatPair
+          label="Avg EV/EBITDA"
+          value={avgEvm != null ? `${avgEvm.toFixed(1)}×` : "—"}
+        />
+        <StatPair
+          label="Best today"
+          value={
+            best && best.day_change_pct != null ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono">{best.ticker}</span>
+                <DeltaChip pct={best.day_change_pct} size="xs" />
+              </span>
+            ) : (
+              "—"
+            )
+          }
+        />
+        <StatPair
+          label="Worst today"
+          value={
+            worst && worst.day_change_pct != null ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono">{worst.ticker}</span>
+                <DeltaChip pct={worst.day_change_pct} size="xs" />
+              </span>
+            ) : (
+              "—"
+            )
+          }
+        />
+      </div>
 
       {/* Stock heatmap */}
       <div className="rounded-md border border-tb-border bg-tb-surface">
@@ -188,6 +261,21 @@ function Col({
         {label}
       </span>
       <span className="text-tb-text">{children}</span>
+    </span>
+  );
+}
+
+function StatPair({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="uppercase tracking-wider text-tb-muted">{label}</span>
+      <span className="font-mono font-medium text-tb-text">{value}</span>
     </span>
   );
 }

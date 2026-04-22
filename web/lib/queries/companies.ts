@@ -164,17 +164,25 @@ export async function getEntityTypeCountsAll(): Promise<
   );
 }
 
-// C1: aggregate KPIs for the Companies index scorecard strip.
-// total_companies: active entity count
-// combined_revenue_eur: latest-per-entity revenue, summed in EUR
-// weighted_ebitda_margin: Σ(margin × revenue_eur) / Σ(revenue_eur)
-// listed_vs_private: counts based on non-null ticker
+// C1 + C2 (T2 polish 3): aggregate KPIs for the Companies index.
+// Primary row (C1):
+//   total_companies, combined_revenue_eur, weighted_ebitda_margin, listed/private
+// Secondary row (C2 — industry snapshot):
+//   total_active_customers   — Σ latest active_customers disclosed per entity
+//   blended_arpu_eur         — Σ(revenue_eur) / Σ(active_customers) for entities with both
+//   top5_concentration_pct   — sum(top-5 revenue_eur) / sum(all revenue_eur) * 100
+//   companies_reporting      — count of entities with at least one metric_value
+//                              in the latest quarter/half/full-year period
 export async function getCompaniesAggregateKpis(): Promise<{
   total_companies: number;
   combined_revenue_eur: number | null;
   weighted_ebitda_margin: number | null;
   listed: number;
   private_count: number;
+  total_active_customers: number | null;
+  blended_arpu_eur: number | null;
+  top5_concentration_pct: number | null;
+  companies_reporting: number;
 }> {
   const rows = await query<{
     total: number;
@@ -182,6 +190,10 @@ export async function getCompaniesAggregateKpis(): Promise<{
     private_count: number;
     combined_rev_eur: string | null;
     weighted_margin: string | null;
+    total_active_customers: string | null;
+    blended_arpu_eur: string | null;
+    top5_concentration_pct: string | null;
+    companies_reporting: number;
   }>(
     `WITH latest_rev AS (
        SELECT DISTINCT ON (mvc.entity_id) mvc.entity_id,
@@ -231,6 +243,44 @@ export async function getCompaniesAggregateKpis(): Promise<{
                 END / NULLIF(lr.eur_rate, 0)) AS rev_eur
        FROM latest_rev lr
      )
+     ,
+     latest_cust AS (
+       SELECT DISTINCT ON (mvc.entity_id) mvc.entity_id,
+              (mvc.value_numeric *
+                CASE mvc.unit_multiplier
+                  WHEN 'billions' THEN 1000000000
+                  WHEN 'millions' THEN 1000000
+                  WHEN 'thousands' THEN 1000
+                  ELSE 1
+                END) AS customers
+       FROM metric_value_canonical mvc
+       JOIN metrics m ON m.id = mvc.metric_id
+       JOIN periods p ON p.id = mvc.period_id
+       JOIN entities e ON e.id = mvc.entity_id
+       WHERE m.code = 'active_customers'
+         AND mvc.entity_id IS NOT NULL AND mvc.market_id IS NULL
+         AND e.is_active = true
+         AND mvc.value_numeric IS NOT NULL
+         AND mvc.disclosure_status = 'disclosed'
+       ORDER BY mvc.entity_id, p.start_date DESC
+     ),
+     top5 AS (
+       SELECT COALESCE(SUM(rev_eur), 0) AS top5_sum
+       FROM (
+         SELECT rev_eur FROM rev_in_eur
+         WHERE rev_eur IS NOT NULL
+         ORDER BY rev_eur DESC NULLS LAST LIMIT 5
+       ) t5
+     ),
+     latest_period AS (
+       SELECT MAX(p.start_date) AS dt
+       FROM periods p
+       WHERE p.period_type IN ('quarter','half_year','full_year','ltm')
+         AND EXISTS (
+           SELECT 1 FROM metric_value_canonical mvc
+           WHERE mvc.period_id = p.id AND mvc.entity_id IS NOT NULL
+         )
+     )
      SELECT
        (SELECT COUNT(*)::int FROM entities
          WHERE is_active = true
@@ -243,7 +293,17 @@ export async function getCompaniesAggregateKpis(): Promise<{
            AND (metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')) AS private_count,
        (SELECT SUM(rev_eur)::text FROM rev_in_eur) AS combined_rev_eur,
        (SELECT (SUM(lm.margin_pct * re.rev_eur) / NULLIF(SUM(re.rev_eur), 0))::text
-          FROM latest_margin lm JOIN rev_in_eur re ON re.entity_id = lm.entity_id) AS weighted_margin`,
+          FROM latest_margin lm JOIN rev_in_eur re ON re.entity_id = lm.entity_id) AS weighted_margin,
+       (SELECT SUM(customers)::text FROM latest_cust) AS total_active_customers,
+       (SELECT (SUM(re.rev_eur) / NULLIF(SUM(lc.customers), 0))::text
+          FROM rev_in_eur re JOIN latest_cust lc ON lc.entity_id = re.entity_id) AS blended_arpu_eur,
+       (SELECT ((SELECT top5_sum FROM top5) / NULLIF(SUM(rv.rev_eur), 0) * 100)::text
+          FROM rev_in_eur rv) AS top5_concentration_pct,
+       (SELECT COUNT(DISTINCT mvc.entity_id)::int
+          FROM metric_value_canonical mvc
+          JOIN periods p ON p.id = mvc.period_id
+          WHERE mvc.entity_id IS NOT NULL
+            AND p.start_date = (SELECT dt FROM latest_period)) AS companies_reporting`,
   );
   const r = rows[0];
   return {
@@ -252,5 +312,13 @@ export async function getCompaniesAggregateKpis(): Promise<{
     weighted_ebitda_margin: r?.weighted_margin ? Number(r.weighted_margin) : null,
     listed: r?.listed ?? 0,
     private_count: r?.private_count ?? 0,
+    total_active_customers: r?.total_active_customers
+      ? Number(r.total_active_customers)
+      : null,
+    blended_arpu_eur: r?.blended_arpu_eur ? Number(r.blended_arpu_eur) : null,
+    top5_concentration_pct: r?.top5_concentration_pct
+      ? Number(r.top5_concentration_pct)
+      : null,
+    companies_reporting: r?.companies_reporting ?? 0,
   };
 }

@@ -22,14 +22,17 @@ import {
 } from "@/lib/adapters";
 import { query } from "@/lib/db";
 import { Leaderboard } from "@/components/primitives/leaderboard";
+import type { LeaderboardRow } from "@/components/primitives/leaderboard";
 import { TickerStrip } from "@/components/overview/ticker-strip";
 import { MoversRow } from "@/components/overview/movers-row";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { Badge } from "@/components/ui/badge";
 import { ReportLink } from "@/components/reports/report-link";
 import { OperatorsSubTabs } from "./operators-sub-tabs";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatEur } from "@/lib/format";
 import type { Report } from "@/lib/types";
+import { getCountryRollupValues } from "@/lib/queries/markets";
+import { MarketBarChart } from "@/components/charts/market-bar";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -60,14 +63,16 @@ export default async function HomePage({
     growers,
     marginLeaders,
     commentary,
+    countryRollup,
   ] = await Promise.all([
-    // B3: switched from `online_ggr` (only 9 markets covered) to
-    // `sportsbook_ggr` (37 markets, much better YoY coverage). UI label
-    // updated below to match.
+    // M2: default back to online_ggr — primary Markets KPI per UI_SPEC_2 Panel 7.
+    // Country scope + rollup (M4) augments coverage for US / Canada from
+    // sub-market data. Raw-country-row shortage is explicit in the helper text.
     getMarketLeaderboard({
-      metricCode: "sportsbook_ggr",
+      metricCode: "online_ggr",
       periodCode,
       limit: 15,
+      marketType: "country",
     }),
     getEntityLeaderboard({
       metricCode: sub.metric,
@@ -82,10 +87,56 @@ export default async function HomePage({
     getBiggestRevenueGrowers(6),
     getMarginExpansionLeaders(6),
     getRecentCommentary(5),
+    // O1 + M4: country-rollup companion — sum-of-children used to augment the
+    // markets leaderboard for countries without a native online_ggr row.
+    getCountryRollupValues({ metricCode: "online_ggr" }),
   ]);
   const periodGroups = groupPeriodsForSelector(populatedPeriods);
 
   const markets = adaptMarketLeaderboardRows(marketRaw);
+  // M4: merge country rollups into overview markets module, matching the
+  // Markets index behaviour so the two surfaces agree.
+  {
+    const existing = new Set(markets.rows.map((r) => r.id));
+    const rollupRows: LeaderboardRow[] = countryRollup
+      .filter((r) => !existing.has(r.market_id))
+      .map((r) => ({
+        id: r.market_id,
+        href: `/markets/${r.slug}`,
+        name: r.name,
+        typeChip: "country",
+        value: r.latest_value_eur,
+        valueFormatted:
+          r.latest_value_eur != null ? formatEur(r.latest_value_eur) : "—",
+        nativeTooltip: null,
+        share: null,
+        yoy: null,
+        sparkline: null,
+        disclosureStatus: "disclosed",
+        extra: `rollup · ${r.child_count} sub-market${r.child_count === 1 ? "" : "s"}`,
+        isRollup: true,
+      }));
+    const merged = [...markets.rows, ...rollupRows].sort(
+      (a, b) => (b.value ?? 0) - (a.value ?? 0),
+    );
+    const denom = merged.reduce((s, r) => s + (r.value ?? 0), 0);
+    if (denom > 0) {
+      for (const r of merged) {
+        r.share = r.value != null ? (r.value / denom) * 100 : null;
+      }
+    }
+    markets.rows = merged;
+    if (markets.total) markets.total.valueFormatted = formatEur(denom);
+  }
+  // O1: bar-chart data — top 10 of the merged markets list
+  const chartPoints = markets.rows
+    .filter((r) => r.value != null)
+    .slice(0, 10)
+    .map((r) => ({
+      name: r.name,
+      value: r.value as number,
+      isRollup: r.isRollup ?? false,
+    }));
   const entities = adaptEntityLeaderboardRows(entityRaw);
 
   return (
@@ -112,8 +163,9 @@ export default async function HomePage({
           <Leaderboard
             className="lg:col-span-2"
             title="Markets"
-            subtitle="Top markets by sportsbook GGR (latest period)"
-            valueLabel="SPORTSBOOK GGR"
+            subtitle="Top countries by online GGR (latest period · country-rollup)"
+            valueLabel="ONLINE GGR"
+            nameLabel="Market"
             rows={markets.rows}
             total={markets.total}
             columns={[
@@ -136,6 +188,33 @@ export default async function HomePage({
             <DataDropsCard drops={dataDrops} />
           </div>
         </div>
+
+        {/* O1 (T2 polish 3): Global iGaming GGR bar chart — top 10 countries
+            by Online GGR. Includes country-rollups (Σ) so US / Canada appear
+            even when their native country row has no online_ggr entry. */}
+        {chartPoints.length > 0 && (
+          <div className="rounded-md border border-tb-border bg-tb-surface">
+            <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+              <div>
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                  Global iGaming — top markets by Online GGR
+                </h3>
+                <p className="mt-0.5 text-[10px] text-tb-muted">
+                  Top {chartPoints.length} countries · latest reported period ·
+                  Σ indicates rolled-up from sub-markets
+                </p>
+              </div>
+              <span className="font-mono text-[10px] text-tb-muted">EUR</span>
+            </div>
+            <div className="p-2">
+              <MarketBarChart
+                data={chartPoints}
+                valueLabel="ONLINE GGR"
+                height={Math.max(220, chartPoints.length * 24 + 40)}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Panel C: Operators / Affiliates / B2B leaderboard */}
         <div>

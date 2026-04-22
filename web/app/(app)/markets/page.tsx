@@ -8,22 +8,27 @@ import { adaptMarketLeaderboardRows } from "@/lib/adapters";
 import {
   listMarkets,
   getMarketTypesWithCounts,
+  getCountryRollupValues,
+  getParentMarketIds,
 } from "@/lib/queries/markets";
 import { Leaderboard } from "@/components/primitives/leaderboard";
+import type { LeaderboardRow } from "@/components/primitives/leaderboard";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { Input } from "@/components/ui/input";
+import { formatEur } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-// Ordered by coverage — default is sportsbook_ggr (37 markets post-T1 Cat A).
-// Previously online_ggr was default but only 9 markets have it, which is the
-// main cause of "only 7 markets visible" reported in the T2 wire-up brief.
+// M2 (T2 polish pass 3): revert default to online_ggr — it's the primary
+// Markets KPI per UI_SPEC_2 Panel 7. Lower coverage (9 markets) is acceptable
+// given the coverage-helper text below; country-scope rollup (M4) augments US
+// and Canada via children sums. Sportsbook GGR remains in the dropdown.
 const METRIC_OPTIONS = [
+  { code: "online_ggr", label: "Online GGR" },
   { code: "sportsbook_ggr", label: "Sportsbook GGR" },
   { code: "sportsbook_handle", label: "Sportsbook Handle" },
   { code: "ggr", label: "Total GGR" },
   { code: "casino_ggr", label: "Casino GGR" },
-  { code: "online_ggr", label: "Online GGR" },
   { code: "sportsbook_revenue", label: "Sportsbook Rev" },
   { code: "online_revenue", label: "Online Rev" },
 ];
@@ -45,21 +50,31 @@ export default async function MarketsIndexPage({
     METRIC_OPTIONS[0];
   const periodCode = searchParams.period ?? null;
 
-  const [lbRaw, markets, typeCounts, populatedPeriods] = await Promise.all([
-    getMarketLeaderboard({
-      metricCode: metric.code,
-      periodCode,
-      limit: 120,
-    }),
-    listMarkets({
-      search: searchParams.q,
-      market_type: searchParams.type,
-      iso_country: searchParams.country,
-      is_regulated: searchParams.regulated,
-    }),
-    getMarketTypesWithCounts(),
-    listPopulatedPeriods(),
-  ]);
+  // M3: default scope is "country" — acts as a scope switcher, not a free
+  // filter. Users pick STATE/REGION/PROVINCE to step into that tier.
+  const scope = searchParams.type ?? "country";
+
+  const [lbRaw, markets, typeCounts, populatedPeriods, rollupRaw, parentIds] =
+    await Promise.all([
+      getMarketLeaderboard({
+        metricCode: metric.code,
+        periodCode,
+        limit: 120,
+      }),
+      listMarkets({
+        search: searchParams.q,
+        market_type: scope,
+        iso_country: searchParams.country,
+        is_regulated: searchParams.regulated,
+      }),
+      getMarketTypesWithCounts(),
+      listPopulatedPeriods(),
+      // M4: country rollup — only meaningful when scope is country.
+      scope === "country"
+        ? getCountryRollupValues({ metricCode: metric.code })
+        : Promise.resolve([]),
+      getParentMarketIds(),
+    ]);
   const periodGroups = groupPeriodsForSelector(populatedPeriods);
 
   // Filter the leaderboard rows by the current filter set using `markets` as
@@ -68,10 +83,57 @@ export default async function MarketsIndexPage({
   const filtered = lbRaw.filter((r) => allowed.has(r.market_id));
   const lb = adaptMarketLeaderboardRows(filtered);
 
-  // M3: helper context — total markets in the filter-narrowed universe vs
-  // how many have data for the currently-selected metric this period.
+  // M4: merge country rollups into the leaderboard. For countries absent from
+  // `lb` (no native country-level value for this metric), add a synthetic row
+  // using the children's summed EUR value. Rollup rows carry an explicit
+  // "rolled up from N sub-markets" hint on the `extra` column and append the
+  // chevron "→" to indicate they're aggregates.
+  if (scope === "country" && rollupRaw.length > 0) {
+    const existing = new Set(lb.rows.map((r) => r.id));
+    const rollupRows: LeaderboardRow[] = rollupRaw
+      .filter((r) => !existing.has(r.market_id))
+      .filter((r) => allowed.has(r.market_id))
+      .map((r) => ({
+        id: r.market_id,
+        href: `/markets/${r.slug}`,
+        name: r.name,
+        typeChip: "country",
+        value: r.latest_value_eur,
+        valueFormatted:
+          r.latest_value_eur != null ? formatEur(r.latest_value_eur) : "—",
+        nativeTooltip: null,
+        share: null, // recomputed below after merge
+        yoy: null, // rollup YoY not computed (prior-year rollup is future work)
+        sparkline: null,
+        beaconMask: undefined,
+        disclosureStatus: "disclosed",
+        beaconCoveragePct: null,
+        extra: `rollup · ${r.child_count} sub-market${r.child_count === 1 ? "" : "s"}`,
+        isRollup: true,
+      }));
+    const mergedRows = [...lb.rows, ...rollupRows];
+    // Re-rank by value desc (EUR for currency, raw otherwise)
+    mergedRows.sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+    // Recompute share against new denominator
+    const denom = mergedRows.reduce((s, r) => s + (r.value ?? 0), 0);
+    if (denom > 0) {
+      for (const r of mergedRows) {
+        r.share = r.value != null ? (r.value / denom) * 100 : null;
+      }
+    }
+    lb.rows = mergedRows;
+    lb.total = lb.total
+      ? { ...lb.total, valueFormatted: formatEur(denom) }
+      : lb.total;
+  }
+
+  // M3: flag rows whose market has sub-markets so the UI can show a chevron.
+  for (const r of lb.rows) {
+    (r as { hasChildren?: boolean }).hasChildren = parentIds.has(r.id);
+  }
+
+  // M3: helper context — total markets in the filter-narrowed universe
   const totalInUniverse = markets.length;
-  const withData = lb.rows.length;
 
   const countries = Array.from(
     new Set(markets.map((m) => m.iso_country).filter(Boolean)),
@@ -107,9 +169,10 @@ export default async function MarketsIndexPage({
           placeholder="Filter by name…"
           className="max-w-xs"
         />
+        {/* M3: scope switcher — default is COUNTRY. Chips act as scope, not filter. */}
         <FilterChips
           name="type"
-          current={searchParams.type}
+          current={scope}
           options={typeCounts.map((t) => ({
             value: t.market_type,
             label: `${t.market_type} (${t.count})`,
@@ -168,10 +231,14 @@ export default async function MarketsIndexPage({
         )}
       </form>
 
-      {/* M3: coverage context for the selected metric */}
+      {/* M3: coverage context for the selected metric + scope */}
       <p className="-mt-1 text-[10px] text-tb-muted">
-        Showing {withData} of {totalInUniverse} markets with data for{" "}
+        Scope: <span className="text-tb-text">{scope.toUpperCase()}</span> ·
+        showing {lb.rows.length} of {totalInUniverse} {scope} rows with data for{" "}
         <span className="text-tb-text">{metric.label}</span>
+        {scope === "country" && rollupRaw.length > 0 ? (
+          <> · Σ = rolled up from sub-markets</>
+        ) : null}
         {periodCode ? (
           <> · period <span className="font-mono">{periodCode}</span></>
         ) : null}
@@ -181,6 +248,7 @@ export default async function MarketsIndexPage({
         title={`Markets — ${metric.label}`}
         subtitle="Latest reported period per market. Beacon™ coverage shows how much of the market's data is modeled."
         valueLabel={metric.label.toUpperCase()}
+        nameLabel="Market"
         rows={lb.rows}
         total={lb.total}
         columns={[

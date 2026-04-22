@@ -123,6 +123,96 @@ export async function getMarketTaxHistory(marketId: string) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// M4: Country rollup — sum sub-market values per period for a metric.
+// Used when a country has no native-row value for the selected metric but
+// its children (states/provinces) do. Returns one row per country with a
+// latest-period rollup, converted to EUR at the source-period FX rate.
+//
+// Returned rows are synthetic leaderboard rows: no spark, no YoY (would
+// require the same rollup across the prior year — non-trivial; future work).
+// The UI marks them with an explicit "rolled-up" chevron via `is_rollup`.
+// ---------------------------------------------------------------------------
+
+export interface CountryRollupRow {
+  market_id: string;
+  name: string;
+  slug: string;
+  market_type: string;
+  iso_country: string | null;
+  regulator_name: string | null;
+  is_regulated: boolean | null;
+  tax_rate_igaming: string | null;
+  latest_value_eur: number | null;
+  latest_period: string;
+  latest_period_end: string | null;
+  unit_type: string;
+  child_count: number;
+}
+
+export async function getCountryRollupValues(opts: {
+  metricCode: string;
+}): Promise<CountryRollupRow[]> {
+  return await query<CountryRollupRow>(
+    `WITH child_sums AS (
+       SELECT
+         parent.id AS parent_id, parent.name, parent.slug, parent.market_type,
+         parent.iso_country, parent.regulator_name, parent.is_regulated,
+         parent.tax_rate_igaming::text AS tax_rate_igaming,
+         p.code AS period_code, p.start_date, p.end_date::text AS end_date_t,
+         m.unit_type,
+         SUM(mvc.value_numeric *
+             CASE mvc.unit_multiplier
+               WHEN 'billions' THEN 1000000000::numeric
+               WHEN 'millions' THEN 1000000::numeric
+               WHEN 'thousands' THEN 1000::numeric
+               ELSE 1::numeric
+             END /
+             COALESCE(NULLIF(fx.eur_rate::numeric, 0), 1)
+         ) AS sum_eur,
+         COUNT(DISTINCT child.id) AS children_in_period
+       FROM markets parent
+       JOIN markets child ON child.parent_market_id = parent.id
+       JOIN metric_value_canonical mvc ON mvc.market_id = child.id AND mvc.entity_id IS NULL
+       JOIN metrics m ON m.id = mvc.metric_id
+       JOIN periods p ON p.id = mvc.period_id
+       LEFT JOIN LATERAL (
+         SELECT f.eur_rate FROM fx_rates f
+         WHERE f.currency_code = COALESCE(UPPER(mvc.currency), 'EUR')
+           AND f.rate_date <= p.end_date
+         ORDER BY f.rate_date DESC LIMIT 1
+       ) fx ON true
+       WHERE m.code = $1
+         AND parent.market_type = 'country'
+         AND mvc.value_numeric IS NOT NULL
+       GROUP BY parent.id, parent.name, parent.slug, parent.market_type,
+                parent.iso_country, parent.regulator_name, parent.is_regulated,
+                parent.tax_rate_igaming, p.code, p.start_date, p.end_date, m.unit_type
+     ),
+     ranked AS (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY parent_id ORDER BY start_date DESC) AS rn
+       FROM child_sums
+     )
+     SELECT parent_id AS market_id, name, slug, market_type, iso_country,
+            regulator_name, is_regulated, tax_rate_igaming,
+            sum_eur::float8 AS latest_value_eur,
+            period_code AS latest_period, end_date_t AS latest_period_end,
+            unit_type, children_in_period::int AS child_count
+     FROM ranked WHERE rn = 1
+     ORDER BY sum_eur DESC NULLS LAST`,
+    [opts.metricCode],
+  );
+}
+
+// Returns set of market ids that have at least one child (country/region with
+// sub-markets). Used by the Markets leaderboard to render a chevron indicator.
+export async function getParentMarketIds(): Promise<Set<string>> {
+  const rows = await query<{ parent_market_id: string }>(
+    `SELECT DISTINCT parent_market_id FROM markets WHERE parent_market_id IS NOT NULL`,
+  );
+  return new Set(rows.map((r) => r.parent_market_id));
+}
+
 export async function getBeaconEstimatesForValues(
   metricValueIds: string[],
 ): Promise<Map<string, BeaconEstimate>> {

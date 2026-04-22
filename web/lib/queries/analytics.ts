@@ -313,6 +313,7 @@ export async function getMarketLeaderboard(opts: {
   sparkLen?: number;
   limit?: number;
   marketType?: string | null;
+  parentMarketId?: string | null; // M5: scope to children of a single market
 }): Promise<MarketLeaderboardRawRow[]> {
   const sparkLen = opts.sparkLen ?? 8;
   const params: unknown[] = [opts.metricCode, sparkLen];
@@ -323,6 +324,10 @@ export async function getMarketLeaderboard(opts: {
     : null;
   const typeFilter = opts.marketType
     ? (params.push(opts.marketType), `AND mk.market_type = $${idx++}`)
+    : "";
+  const parentFilter = opts.parentMarketId
+    ? (params.push(opts.parentMarketId),
+      `AND mk.parent_market_id = $${idx++}`)
     : "";
   const latestFilter = periodParamIdx
     ? `AND latest.period_code = $${periodParamIdx}`
@@ -408,7 +413,7 @@ export async function getMarketLeaderboard(opts: {
       AND prev.rn = (SELECT MIN(rn) FROM per_market WHERE market_id = mk.id AND
                      start_date <= (latest.start_date - INTERVAL '270 days')::date
                      AND start_date >= (latest.start_date - INTERVAL '430 days')::date)
-    WHERE 1=1 ${typeFilter}
+    WHERE 1=1 ${typeFilter} ${parentFilter}
     ORDER BY (latest.value_numeric / NULLIF(latest.eur_rate::numeric, 0) * COALESCE(
       CASE latest.unit_multiplier
         WHEN 'billions' THEN 1000000000

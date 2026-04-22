@@ -26,6 +26,10 @@ export type LeaderboardRow = {
   disclosureStatus?: DisclosureStatus;
   beaconCoveragePct?: number | null; // for market leaderboards
   extra?: React.ReactNode;
+  // M3/M4: set on country rows that roll up sub-market values, or any row
+  // whose market has children — renders a chevron next to the name.
+  hasChildren?: boolean;
+  isRollup?: boolean;
 };
 
 export type LeaderboardColumn =
@@ -49,6 +53,7 @@ export function Leaderboard({
   columns = ["rank", "name", "value", "share", "yoy", "sparkline", "ticker"],
   total,
   valueLabel,
+  nameLabel = "Entity",
   maxRows,
   showViewAll,
   viewAllHref,
@@ -64,6 +69,7 @@ export function Leaderboard({
   columns?: LeaderboardColumn[];
   total?: { valueFormatted: string; yoy?: number | null } | null;
   valueLabel?: string;
+  nameLabel?: string; // M1: column header for the primary label (Entity | Market)
   maxRows?: number;
   showViewAll?: boolean;
   viewAllHref?: string;
@@ -127,10 +133,10 @@ export function Leaderboard({
                 <th className="w-8 px-3 py-1 text-left">#</th>
               )}
               {effectiveColumns.includes("name") && (
-                <th className="px-3 py-1 text-left">Entity</th>
+                <th className="px-3 py-1 text-left">{nameLabel}</th>
               )}
               {effectiveColumns.includes("value") && (
-                <th className="px-3 py-1 text-right">
+                <th className="w-[140px] px-3 py-1 text-right">
                   {valueLabel ?? "Value"}
                 </th>
               )}
@@ -193,6 +199,22 @@ export function Leaderboard({
                         </Link>
                       ) : (
                         <span className="truncate">{row.name}</span>
+                      )}
+                      {row.hasChildren && (
+                        <span
+                          className="font-mono text-[9px] text-tb-muted"
+                          title="Has sub-markets — click to drill in"
+                        >
+                          ›
+                        </span>
+                      )}
+                      {row.isRollup && (
+                        <span
+                          className="rounded border border-tb-border px-1 text-[8px] uppercase tracking-wider text-tb-muted"
+                          title="Rolled up from sub-markets"
+                        >
+                          Σ
+                        </span>
                       )}
                     </div>
                   </td>
