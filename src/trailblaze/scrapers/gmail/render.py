@@ -7,12 +7,12 @@ fidelity. Tables are preserved as whitespace-aligned plain text so the
 classifier + extractor see the same tabular shape they'd see in a Trailblaze
 PDF.
 
-Why a visible ``ANALYST NOTE`` header block?
-  1. The classifier picks up ``From:`` / ``Date:`` / ``Subject:`` in the raw
-     text, making attribution explicit in ``reports.raw_text``.
-  2. When the synthetic PDF is viewed in the dashboard's overlay viewer, the
-     analyst + original subject line are right at the top — no need to cross-
-     reference ``gmail_ingested_messages``.
+The PDF contains **only the email body** — the viewer overlay in the
+dashboard already displays sender/date/subject chrome via the report-
+metadata API, and the rendered chrome looked unprofessional inside the
+overlay. Analyst context is still preserved for the parser + for
+``reports.raw_text`` via ``analyst_header_text()``, which the orchestrator
+prepends to the extracted PDF text via ``parse_pdf(raw_text_prefix=...)``.
 """
 
 from __future__ import annotations
@@ -147,32 +147,29 @@ def _latin1_safe(s: str) -> str:
     return s.encode("latin-1", "replace").decode("latin-1")
 
 
-def _draw_header(
-    pdf: FPDF,
+def analyst_header_text(
     *,
     sender_email: str,
     sender_name: str | None,
     subject: str,
     received_at: datetime | None,
-) -> None:
-    pdf.set_font("Helvetica", style="B", size=14)
-    pdf.cell(0, 8, _latin1_safe("ANALYST NOTE"), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", size=10)
+) -> str:
+    """Return the ``ANALYST NOTE`` context block as plain text.
 
+    This used to render into the PDF but now lives only in
+    ``reports.raw_text`` (prepended via ``parse_pdf(raw_text_prefix=...)``).
+    Keeping the subject + sender in the LLM-visible text is important for
+    classification — without it the parser would lose every cue about who
+    sent the note and what the report covers.
+    """
     display_from = f"{sender_name} <{sender_email}>" if sender_name else sender_email
     date_str = received_at.strftime("%Y-%m-%d %H:%M %Z").strip() if received_at else "(no date)"
-    for label, value in (("From", display_from), ("Date", date_str), ("Subject", subject or "(no subject)")):
-        pdf.set_font("Helvetica", style="B", size=10)
-        pdf.cell(16, 5, _latin1_safe(f"{label}:"))
-        pdf.set_font("Helvetica", size=10)
-        pdf.multi_cell(0, 5, _latin1_safe(value), new_x="LMARGIN", new_y="NEXT")
-
-    pdf.ln(2)
-    pdf.set_draw_color(128, 128, 128)
-    pdf.set_line_width(0.2)
-    y = pdf.get_y()
-    pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
-    pdf.ln(3)
+    return (
+        "ANALYST NOTE\n"
+        f"From: {display_from}\n"
+        f"Date: {date_str}\n"
+        f"Subject: {subject or '(no subject)'}"
+    )
 
 
 def render_email_to_pdf(
@@ -184,7 +181,14 @@ def render_email_to_pdf(
     html_body: str | None,
     text_body: str | None,
 ) -> RenderedEmail:
-    """Produce a synthetic PDF containing the analyst-note header + email body."""
+    """Produce a body-only synthetic PDF. Metadata stays out of the render.
+
+    ``sender_email`` / ``sender_name`` / ``subject`` / ``received_at`` are
+    only used for the filename and for upstream callers that may want to
+    persist them elsewhere — the PDF itself contains just the flattened
+    email body. See ``analyst_header_text`` for the prose form of the
+    metadata block.
+    """
     if html_body:
         body_text = html_to_text(html_body)
     elif text_body:
@@ -195,14 +199,6 @@ def render_email_to_pdf(
     pdf = FPDF(format="Letter", unit="mm")
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
-
-    _draw_header(
-        pdf,
-        sender_email=sender_email,
-        sender_name=sender_name,
-        subject=subject,
-        received_at=received_at,
-    )
 
     # Monospace body preserves table alignment built by _render_table.
     pdf.set_font("Courier", size=9)

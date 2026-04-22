@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select, text
@@ -22,15 +23,38 @@ from trailblaze.parser.ingest import IngestResult, ingest
 log = logging.getLogger(__name__)
 
 
-def parse_pdf(pdf_path: Path) -> IngestResult:
+def parse_pdf(
+    pdf_path: Path,
+    *,
+    raw_text_prefix: str | None = None,
+    published_ts_override: datetime | None = None,
+) -> IngestResult:
+    """Parse one PDF end-to-end.
+
+    ``raw_text_prefix``
+        Optional string prepended to the extracted PDF text before the LLM
+        classifier / extractor sees it, and stored on ``reports.raw_text``.
+        Used by the Gmail ingestion pipeline to inject ``From / Date /
+        Subject`` context that isn't rendered into the synthetic PDF itself.
+
+    ``published_ts_override``
+        Optional timestamp that wins over ``pdf_io.published_timestamp``.
+        Used by the Gmail pipeline so ``reports.published_timestamp`` reflects
+        the email's sent date, not the synthetic PDF's file mtime.
+
+    Both parameters default to None — non-Gmail callers see identical
+    behavior to the pre-override signature.
+    """
     pdf_path = pdf_path.resolve()
     if not pdf_path.exists():
         raise FileNotFoundError(pdf_path)
 
     log.info("Parsing %s", pdf_path.name)
     raw_text = pdf_io.extract_text(pdf_path)
+    if raw_text_prefix:
+        raw_text = f"{raw_text_prefix.rstrip()}\n\n{raw_text}"
     file_hash = pdf_io.file_sha256(pdf_path)
-    published_ts = pdf_io.published_timestamp(pdf_path)
+    published_ts = published_ts_override or pdf_io.published_timestamp(pdf_path)
 
     # Dedup pre-check — skip LLM calls entirely if already ingested.
     with session_scope() as session:

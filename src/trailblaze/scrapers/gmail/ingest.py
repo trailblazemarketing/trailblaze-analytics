@@ -24,9 +24,8 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -42,7 +41,7 @@ from trailblaze.scrapers.gmail.config import (
     SYNTHETIC_PDF_DIR,
     TRUSTED_SENDERS,
 )
-from trailblaze.scrapers.gmail.render import render_email_to_pdf
+from trailblaze.scrapers.gmail.render import analyst_header_text, render_email_to_pdf
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +55,7 @@ class IngestSummary:
     skipped_duplicate: int = 0
     rejected_sender: int = 0
     errors: int = 0
+    reprocessed: int = 0
     error_details: list[tuple[str, str]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, int]:
@@ -64,6 +64,7 @@ class IngestSummary:
             "ingested": self.ingested,
             "skipped_duplicate": self.skipped_duplicate,
             "rejected_sender": self.rejected_sender,
+            "reprocessed": self.reprocessed,
             "errors": self.errors,
         }
 
@@ -154,13 +155,32 @@ def ingest_labeled_emails(
     dry_run: bool = False,
     limit: int | None = None,
     force: bool = False,
+    reprocess_existing: bool = False,
 ) -> IngestSummary:
-    """Process every message currently wearing the ``INGEST_LABEL``."""
+    """Process messages for the Gmail ingestion pipeline.
+
+    Default mode lists every Gmail message currently wearing
+    ``INGEST_LABEL`` and runs the full ingestion flow. When
+    ``reprocess_existing`` is set, the message set instead comes from
+    ``gmail_ingested_messages.status='ingested'`` (matches messages that
+    already wear ``INGESTED_LABEL`` in Gmail); the orchestrator deletes the
+    old ``reports`` + ``metric_values`` rows and re-renders / re-parses each
+    from scratch, so a renderer or parser change can be retroactively
+    applied.
+    """
     SYNTHETIC_PDF_DIR.mkdir(parents=True, exist_ok=True)
 
     service = gclient.build_gmail_service()
     label_map = gclient.ensure_labels_exist(service)
     log.info("Trailblaze labels present: %s", sorted(label_map))
+
+    if reprocess_existing:
+        return _reprocess_existing(
+            service=service,
+            label_map=label_map,
+            dry_run=dry_run,
+            limit=limit,
+        )
 
     message_ids = gclient.list_labeled_messages(
         service, INGEST_LABEL, label_map=label_map, max_results=limit
@@ -186,6 +206,67 @@ def ingest_labeled_emails(
             force=force,
             summary=summary,
         )
+
+    return summary
+
+
+def _reprocess_existing(
+    *,
+    service,
+    label_map: dict[str, str],
+    dry_run: bool,
+    limit: int | None,
+) -> IngestSummary:
+    """Rerun render + parse against every already-ingested email.
+
+    Drives from ``gmail_ingested_messages`` rather than a Gmail label query
+    so the Gmail-side labels (``Trailblaze-Ingested``) don't need flipping.
+    Deletes ``metric_values`` explicitly because their FK to ``reports.id``
+    is ``ON DELETE SET NULL`` — letting them go to NULL would leave orphan
+    rows visible in the UI with no report link.
+    """
+    with session_scope() as s:
+        rows = s.execute(
+            select(
+                GmailIngestedMessage.message_id,
+                GmailIngestedMessage.report_id,
+                GmailIngestedMessage.subject,
+            ).where(GmailIngestedMessage.status == "ingested")
+        ).all()
+    if limit is not None:
+        rows = rows[:limit]
+
+    summary = IngestSummary(found=len(rows))
+    log.info("reprocess_existing: %d previously-ingested messages", summary.found)
+
+    if dry_run:
+        for r in rows:
+            log.info("[dry-run reprocess] %s (report_id=%s) subject=%r",
+                     r.message_id, r.report_id, r.subject)
+        return summary
+
+    for r in rows:
+        # 1. Delete the stale report + its metric_values. Narratives,
+        #    report_entities, report_markets cascade via ON DELETE CASCADE.
+        if r.report_id is not None:
+            with session_scope() as s:
+                s.execute(delete(MetricValue).where(MetricValue.report_id == r.report_id))
+                s.execute(delete(Report).where(Report.id == r.report_id))
+            log.info("reprocess_existing: deleted stale report %s", r.report_id)
+
+        # 2. Re-fetch + run the normal single-message flow with force=True so
+        #    the gmail_ingested_messages idempotency check doesn't short-
+        #    circuit us.
+        before = summary.ingested
+        _process_one(
+            service=service,
+            label_map=label_map,
+            message_id=r.message_id,
+            force=True,
+            summary=summary,
+        )
+        if summary.ingested > before:
+            summary.reprocessed += 1
 
     return summary
 
@@ -286,8 +367,21 @@ def _process_one(
         return
 
     # Parse + retarget source, in one session so retarget stays transactional.
+    # Overrides give the LLM classifier analyst-note context (subject line is
+    # often the clearest cue for company/period) and force published_timestamp
+    # onto the email's sent date rather than the synthetic PDF's file mtime.
+    header_text = analyst_header_text(
+        sender_email=msg.sender_email,
+        sender_name=msg.sender_name,
+        subject=msg.subject,
+        received_at=msg.received_at,
+    )
     try:
-        result = parse_pdf(pdf_path)
+        result = parse_pdf(
+            pdf_path,
+            raw_text_prefix=header_text,
+            published_ts_override=msg.received_at,
+        )
         with session_scope() as s:
             _retarget_to_analyst_note(s, result.report_id)
             _record_ingest_row(
