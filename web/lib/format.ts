@@ -13,6 +13,63 @@ export function toRaw(value: number, mult: UnitMultiplier): number {
   return value * MULT[mult];
 }
 
+// Metric codes whose disclosed values are expected to be large
+// monetary amounts (millions / billions of EUR / USD / etc.). When a
+// metric_values row for one of these metrics carries `unit_multiplier
+// IS NULL` AND the raw value sits in the small-decimal range that
+// matches "stored in millions but multiplier dropped during
+// extraction", we infer `millions` rather than letting the formatter
+// render "€236.65" for what's really €236.65M. Parser-side root cause
+// is logged in COMPANY_AUDIT_PARSER_TODOS.md.
+const SCALE_IMPLIED_METRICS: ReadonlySet<string> = new Set([
+  "revenue",
+  "ngr",
+  "ggr",
+  "online_ggr",
+  "online_ngr",
+  "online_revenue",
+  "casino_ggr",
+  "casino_revenue",
+  "sportsbook_ggr",
+  "sportsbook_revenue",
+  "sportsbook_handle",
+  "sportsbook_turnover",
+  "lottery_revenue",
+  "ebitda",
+  "adjusted_ebitda",
+  "marketing_spend",
+  "market_cap",
+  "net_income",
+  "operating_profit",
+  "revenue_guidance",
+  "ebitda_guidance",
+  "b2b_revenue",
+  "b2c_revenue",
+  "other_revenue",
+  "customer_deposits",
+  "handle",
+]);
+
+// Defensive multiplier inference. Use only when `unit_multiplier IS
+// NULL` on a row whose metric_code is in SCALE_IMPLIED_METRICS and
+// whose value sits in the 0.01..100000 band — that band is what
+// values stored in millions / billions look like before scaling, and
+// it's small enough that we won't accidentally inflate an already-
+// converted figure. Returns the inferred multiplier or null if no
+// safe inference is possible.
+export function inferUnitMultiplier(
+  rawValue: number | null | undefined,
+  metricCode: string | null | undefined,
+  currentMultiplier: UnitMultiplier,
+): UnitMultiplier {
+  if (currentMultiplier) return currentMultiplier;
+  if (rawValue == null) return null;
+  if (!metricCode || !SCALE_IMPLIED_METRICS.has(metricCode)) return null;
+  const abs = Math.abs(rawValue);
+  if (abs >= 0.01 && abs < 100_000) return "millions";
+  return null;
+}
+
 // Compact relative-time formatter for "updated X ago" displays. No
 // dependency — covers seconds → weeks; coarser anchors past that point
 // would belong on a calendar date instead. Returns "—" when input

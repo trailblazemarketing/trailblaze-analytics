@@ -162,10 +162,32 @@ export async function getCountryRollupValues(opts: {
          p.code AS period_code, p.start_date, p.end_date::text AS end_date_t,
          m.unit_type,
          SUM(mvc.value_numeric *
-             CASE mvc.unit_multiplier
-               WHEN 'billions' THEN 1000000000::numeric
-               WHEN 'millions' THEN 1000000::numeric
-               WHEN 'thousands' THEN 1000::numeric
+             CASE
+               WHEN mvc.unit_multiplier = 'billions' THEN 1000000000::numeric
+               WHEN mvc.unit_multiplier = 'millions' THEN 1000000::numeric
+               WHEN mvc.unit_multiplier = 'thousands' THEN 1000::numeric
+               -- Defensive multiplier inference: parser sometimes drops
+               -- unit_multiplier on currency rows (US-state online_ggr
+               -- in particular). For metrics whose disclosed values
+               -- are expected to be large monetary amounts, infer
+               -- millions when the raw value sits in the 0.01..100k
+               -- band that matches "stored in millions, multiplier
+               -- dropped". Mirrors lib/format.ts inferUnitMultiplier.
+               -- Parser fix tracked in COMPANY_AUDIT_PARSER_TODOS.md.
+               WHEN mvc.unit_multiplier IS NULL
+                    AND m.code IN (
+                      'revenue','ngr','ggr','online_ggr','online_ngr',
+                      'online_revenue','casino_ggr','casino_revenue',
+                      'sportsbook_ggr','sportsbook_revenue','sportsbook_handle',
+                      'sportsbook_turnover','lottery_revenue','ebitda',
+                      'adjusted_ebitda','marketing_spend','market_cap',
+                      'net_income','operating_profit','revenue_guidance',
+                      'ebitda_guidance','b2b_revenue','b2c_revenue',
+                      'other_revenue','customer_deposits','handle'
+                    )
+                    AND ABS(mvc.value_numeric) >= 0.01
+                    AND ABS(mvc.value_numeric) < 100000
+                 THEN 1000000::numeric
                ELSE 1::numeric
              END /
              COALESCE(NULLIF(fx.eur_rate::numeric, 0), 1)

@@ -51,6 +51,7 @@ import {
   truncateAtSentence,
   formatPeriodLabel,
   relativeTime,
+  inferUnitMultiplier,
 } from "@/lib/format";
 import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { query } from "@/lib/db";
@@ -551,16 +552,36 @@ export default async function CompanyDetailPage({
           cells: {},
         });
       }
-      const native = r.value_numeric != null ? Number(r.value_numeric) : null;
+      const nativeNumeric = r.value_numeric != null ? Number(r.value_numeric) : null;
+      // Defensive multiplier inference for parser rows that came in
+      // without a unit_multiplier on a metric whose values are
+      // expected to be large monetary amounts. Without this, US-state
+      // rows like online_ggr=272.1 (millions, multiplier dropped)
+      // displayed as "€254.40" instead of "€254.40M". Parser-side
+      // root cause logged in COMPANY_AUDIT_PARSER_TODOS.md.
+      const inferredMult = inferUnitMultiplier(
+        nativeNumeric,
+        r.metric_code,
+        r.unit_multiplier,
+      );
+      const scaleFactor =
+        inferredMult === "billions"
+          ? 1_000_000_000
+          : inferredMult === "millions"
+          ? 1_000_000
+          : inferredMult === "thousands"
+          ? 1_000
+          : 1;
+      const scaledNative = nativeNumeric != null ? nativeNumeric * scaleFactor : null;
       const sortVal =
-        r.metric_unit_type === "currency" && native != null && r.eur_rate
-          ? native / Number(r.eur_rate)
-          : native;
+        r.metric_unit_type === "currency" && scaledNative != null && r.eur_rate
+          ? scaledNative / Number(r.eur_rate)
+          : scaledNative;
       const display =
-        r.metric_unit_type === "currency" && native != null && r.eur_rate
-          ? formatEur(native / Number(r.eur_rate))
-          : native != null
-          ? abbreviate(native)
+        r.metric_unit_type === "currency" && scaledNative != null && r.eur_rate
+          ? formatEur(scaledNative / Number(r.eur_rate))
+          : scaledNative != null
+          ? abbreviate(scaledNative)
           : "—";
       geoMarketIds.get(r.market_id)!.cells[r.period_code] = {
         value: sortVal,

@@ -7,7 +7,7 @@ import type {
   UnitMultiplier,
   UnitType,
 } from "@/lib/types";
-import { toRaw } from "@/lib/format";
+import { toRaw, inferUnitMultiplier } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -127,6 +127,7 @@ export interface LeaderboardRowRaw {
       }[]
     | null;
   entity_type_codes: string[] | null;
+  metric_code: string;
 }
 
 export async function getEntityLeaderboard(opts: {
@@ -229,6 +230,7 @@ export async function getEntityLeaderboard(opts: {
            latest.end_date::text AS latest_period_end,
            latest.eur_rate AS latest_eur_rate,
            latest.unit_type,
+           latest.metric_code,
            prev.value_numeric::text AS prev_year_value,
            prev.unit_multiplier AS prev_year_multiplier,
            prev.currency AS prev_year_currency,
@@ -310,6 +312,7 @@ export interface MarketLeaderboardRawRow {
     | null;
   operator_count: number;
   beacon_coverage_pct: number | null;
+  metric_code: string;
 }
 
 export async function getMarketLeaderboard(opts: {
@@ -392,6 +395,7 @@ export async function getMarketLeaderboard(opts: {
            latest.end_date::text AS latest_period_end,
            latest.eur_rate AS latest_eur_rate,
            latest.unit_type,
+           latest.metric_code,
            prev.value_numeric::text AS prev_year_value,
            prev.unit_multiplier AS prev_year_multiplier,
            prev.currency AS prev_year_currency,
@@ -536,6 +540,23 @@ export function nativeToEur(
   const r = Number(rate);
   if (!Number.isFinite(r) || r === 0) return null;
   return raw / r;
+}
+
+// EUR conversion with defensive multiplier inference. Use when the
+// caller has the metric_code in hand and the data path is known to
+// occasionally produce rows with unit_multiplier=NULL on
+// scale-implied currency metrics (US-state online_ggr is the prime
+// example — see Fix D / parser TODO 13). Falls through to plain
+// nativeToEur when the row already has an explicit multiplier.
+export function nativeToEurInferred(
+  v: string | null,
+  mult: UnitMultiplier,
+  rate: string | null,
+  metricCode: string | null | undefined,
+): number | null {
+  if (mult || v == null) return nativeToEur(v, mult, rate);
+  const inferred = inferUnitMultiplier(Number(v), metricCode, mult);
+  return nativeToEur(v, inferred, rate);
 }
 
 // Inject explicit null entries for missing periods between the first

@@ -11,6 +11,7 @@ import {
   yoyPctGated,
 } from "@/lib/queries/analytics";
 import { formatEur, formatNative } from "@/lib/format";
+import { nativeToEurInferred } from "@/lib/queries/analytics";
 import type { UnitType, UnitMultiplier } from "@/lib/types";
 
 // Format a scalar for display. Monetary → EUR abbreviated; others use their
@@ -67,7 +68,12 @@ export function adaptEntityLeaderboardRows(
   const withEur = raw.map((r) => {
     const isCurrency = r.unit_type === "currency";
     const eur = isCurrency
-      ? nativeToEur(r.latest_value, r.unit_multiplier, r.latest_eur_rate)
+      ? nativeToEurInferred(
+          r.latest_value,
+          r.unit_multiplier,
+          r.latest_eur_rate,
+          r.metric_code,
+        )
       : null;
     const rawVal = toRawNumeric(r.latest_value, r.unit_multiplier);
     const yoy = yoyPctGated({
@@ -165,7 +171,12 @@ export function adaptMarketLeaderboardRows(
   const withEur = raw.map((r) => {
     const isCurrency = r.unit_type === "currency";
     const eur = isCurrency
-      ? nativeToEur(r.latest_value, r.unit_multiplier, r.latest_eur_rate)
+      ? nativeToEurInferred(
+          r.latest_value,
+          r.unit_multiplier,
+          r.latest_eur_rate,
+          r.metric_code,
+        )
       : null;
     const rawVal = toRawNumeric(r.latest_value, r.unit_multiplier);
     const yoy = yoyPctGated({
