@@ -100,6 +100,40 @@ export async function getCompanyBySlug(slug: string): Promise<Entity | null> {
   return { ...row, entity_type_codes: row.entity_type_codes ?? [] };
 }
 
+// Best-effort alias lookup for a slug that didn't match canonical.
+// Used by the company detail page to redirect URLs like
+// /companies/flutter-entertainment → /companies/flutter when the
+// long-form slug is not the canonical one. Tries:
+//   1. The entity's `aliases` text[] column (if any are seeded)
+//   2. Name-normalised match: e.g. "flutter-entertainment" → match
+//      WHERE lower(regexp_replace(name, '[^a-z0-9]+', '-', 'gi')) = $1
+// Returns just the canonical slug + name so the caller can redirect
+// without paying for the full entity load.
+export async function findCanonicalSlugForAlias(
+  alias: string,
+): Promise<{ slug: string; name: string } | null> {
+  const aliasMatch = await queryOne<{ slug: string; name: string }>(
+    `SELECT slug, name FROM entities
+     WHERE is_active = true AND $1 = ANY(aliases)
+     LIMIT 1`,
+    [alias],
+  );
+  if (aliasMatch) return aliasMatch;
+  // Name-normalised lookup. Postgres regex_replace lowercase + collapse
+  // non-alphanumeric to "-". Trim leading/trailing hyphens to mirror
+  // standard slugify output. Returns the row whose normalised name
+  // equals the requested alias.
+  const nameMatch = await queryOne<{ slug: string; name: string }>(
+    `SELECT slug, name FROM entities
+     WHERE is_active = true
+       AND trim(both '-' from regexp_replace(lower(name), '[^a-z0-9]+', '-', 'g')) = $1
+     ORDER BY length(name) ASC
+     LIMIT 1`,
+    [alias.toLowerCase()],
+  );
+  return nameMatch;
+}
+
 export async function getCompanyMetricsCanonical(
   entityId: string,
 ): Promise<MetricValueRow[]> {

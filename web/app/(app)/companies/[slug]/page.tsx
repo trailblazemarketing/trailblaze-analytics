@@ -1,9 +1,10 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import {
   getCompanyBySlug,
   getCompanyReports,
   getCompanyNarratives,
+  findCanonicalSlugForAlias,
 } from "@/lib/queries/companies";
 import { getBeaconEstimatesForValues } from "@/lib/queries/markets";
 import {
@@ -122,8 +123,19 @@ export default async function CompanyDetailPage({
   params: { slug: string };
   searchParams: { period?: string };
 }) {
-  const company = await getCompanyBySlug(params.slug);
-  if (!company) notFound();
+  let company = await getCompanyBySlug(params.slug);
+  if (!company) {
+    // The requested slug isn't canonical. Try alias / name-normalised
+    // lookup so common variants like /companies/flutter-entertainment
+    // resolve to the canonical /companies/flutter rather than 404'ing.
+    const canonical = await findCanonicalSlugForAlias(params.slug);
+    if (canonical && canonical.slug !== params.slug) {
+      redirect(`/companies/${canonical.slug}`);
+    }
+    notFound();
+  }
+  // Defensive: hint to TS that company is non-null after this point.
+  company = company as NonNullable<typeof company>;
 
   const periodCode = searchParams.period ?? null;
   const kind = panelKindFor(company.entity_type_codes);
