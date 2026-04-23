@@ -103,19 +103,47 @@ export function formatPeriodLabel(
   code: string,
   displayName?: string | null,
 ): string {
-  // LTM-Q1-25 / LTM-Q2-25 / LTM-25 patterns
+  // LTM-Q1-25 / LTM-Q2-25 / LTM-25 — promote to "LTM (ending …)"
   if (code.startsWith("LTM")) {
     const tail = code.slice(4); // strip "LTM-"
-    // LTM-Q1-25 → "Q1 2025"; LTM-25 → "2025"
     const qMatch = tail.match(/^(Q[1-4])-(\d{2})$/);
-    if (qMatch) {
-      const qLabel = qMatch[1];
-      const yr = `20${qMatch[2]}`;
-      return `LTM (ending ${qLabel} ${yr})`;
-    }
+    if (qMatch) return `LTM (ending ${qMatch[1]} 20${qMatch[2]})`;
     const yMatch = tail.match(/^(\d{2})$/);
-    if (yMatch) return `LTM (ending ${`20${yMatch[1]}`})`;
-    // Fall back to whatever display_name carries
+    if (yMatch) return `LTM (ending 20${yMatch[1]})`;
+  }
+  // Q1-26 / H1-26 / FY-25 / 9M-25 — derive from code when display_name
+  // is missing or in a different form. Keeps the "AS OF" pill output
+  // consistent across pages even when the periods table is sparsely
+  // populated for some codes.
+  const std = code.match(/^(Q[1-4]|H[12]|9M|FY)-(\d{2})$/);
+  if (std) return `${std[1]} 20${std[2]}`;
+  // Mmm-YY (Jan-26, Feb-26, ...) — display_name already gives "Jan 2026"
+  // but normalise here too for robustness.
+  const mmm = code.match(/^([A-Z][a-z]{2})-(\d{2})$/);
+  if (mmm) return `${mmm[1]} 20${mmm[2]}`;
+  // M2026-01 (parser-style monthly code) → "Jan 2026"
+  const isoMonth = code.match(/^M(\d{4})-(\d{2})$/);
+  if (isoMonth) {
+    const monthIdx = Number(isoMonth[2]) - 1;
+    if (monthIdx >= 0 && monthIdx < 12) {
+      const names = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      ];
+      return `${names[monthIdx]} ${isoMonth[1]}`;
+    }
+  }
+  // D2026-04-21 (daily snapshot, e.g. stock_price) → "21 Apr 2026"
+  const day = code.match(/^D(\d{4})-(\d{2})-(\d{2})$/);
+  if (day) {
+    const monthIdx = Number(day[2]) - 1;
+    const names = [
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${Number(day[3])} ${names[monthIdx]} ${day[1]}`;
+    }
   }
   return displayName ?? code;
 }
