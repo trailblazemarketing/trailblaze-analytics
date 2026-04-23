@@ -124,7 +124,7 @@ export default async function OperatorsPage({
           consistent with the tiles below. */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-md border border-tb-border bg-tb-surface px-3 py-1.5 text-[10px]">
         <StatPair
-          label="Listed operators"
+          label="Listed (with stock data)"
           value={listedCount.toLocaleString()}
         />
         <StatPair

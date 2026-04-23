@@ -211,6 +211,7 @@ export async function getEntityLeaderboard(opts: {
         ${marketJoin}
         ${typeFilter}
         AND mvc.entity_id IS NOT NULL
+        AND mvc.value_numeric IS NOT NULL
         ${opts.includePending ? "" : "AND (e.metadata->>'status' IS DISTINCT FROM 'auto_added_needs_review')"}
     ),
     per_entity AS (
@@ -377,6 +378,7 @@ export async function getMarketLeaderboard(opts: {
       WHERE m.code = $1
         AND mvc.market_id IS NOT NULL
         AND mvc.entity_id IS NULL
+        AND mvc.value_numeric IS NOT NULL
     ),
     per_market AS (
       SELECT s.*,
