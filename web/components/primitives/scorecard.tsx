@@ -26,6 +26,12 @@ export type KpiTile = {
   beacon?: BeaconEstimate | null;
   drillHref?: string | null;
   unitHint?: string | null; // e.g., "$m", "%", "#"
+  // Short period label for the value ("Q1 2026" / "LTM Q1 2026" / "FY 2025").
+  // Round 7 truth-check surfaced that Hero tiles mixed single-quarter
+  // Revenue with LTM NGR, which looked like an impossibility (NGR >
+  // Revenue) when it was really a period-scope mismatch. Surfacing the
+  // period on every tile makes that explicit.
+  period?: string | null;
 };
 
 export function Scorecard({
@@ -151,6 +157,11 @@ function PrimaryTile({ kpi }: { kpi: KpiTile }) {
         {isBeacon && kpi.valueFormatted && (
           <sup className="beacon-tm">™</sup>
         )}
+        {kpi.period && kpi.valueFormatted && (
+          <span className="font-mono text-[9px] text-tb-muted">
+            · {kpi.period}
+          </span>
+        )}
       </div>
       <div className="flex items-center justify-between text-[10px]">
         {kpi.valueFormatted == null ? (
@@ -224,6 +235,11 @@ function SecondaryTile({ kpi }: { kpi: KpiTile }) {
         </span>
         {isBeacon && kpi.valueFormatted && (
           <sup className="beacon-tm text-[8px]">™</sup>
+        )}
+        {kpi.period && kpi.valueFormatted && (
+          <span className="font-mono text-[8px] text-tb-muted">
+            · {kpi.period}
+          </span>
         )}
       </div>
       {/* B5: dropped per-tile SourceLabel — 4-8 secondary tiles all

@@ -254,6 +254,13 @@ export function buildKpiTile(
       })
     : null;
 
+  // Compact period label for the tile — round-7 truth-check surfaced
+  // that Hero tiles mixed single-quarter Revenue with LTM NGR and looked
+  // like NGR > Revenue. Tag every tile with its actual period. Prefer
+  // the DB display_name ("Q1 2026", "LTM Q1 2026", "FY 2025"), fall back
+  // to the raw code.
+  const period = latest.period_display_name ?? latest.period_code ?? null;
+
   return {
     code: recipe.code,
     label: recipe.label,
@@ -266,6 +273,7 @@ export function buildKpiTile(
     disclosureStatus: latest.disclosure_status,
     beacon: beacon.get(latest.metric_value_id) ?? null,
     unitHint: unitHint(latest.metric_unit_type),
+    period,
   };
 }
 
