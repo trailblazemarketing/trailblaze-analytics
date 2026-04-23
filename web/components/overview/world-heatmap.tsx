@@ -21,20 +21,46 @@ export interface CountryDatum {
 
 // Cyan gradient — dark for low, bright for high. Drives `fill` per
 // country geography by mapping the country's online_ggr value into a
-// log-scaled [0..1] band, then interpolating between baseline grey
-// and bright cyan.
+// log-scaled band, then interpolating between dark cyan (low) and a
+// vivid near-white cyan (high). Tuned to match the perceptual
+// intensity of the /operators stock heatmap so the brightest
+// countries (UK / Italy / Brazil) read as clearly distinct from
+// mid-tier (Spain / Portugal / Greece) — the QA report flagged the
+// previous palette as too subtle.
+//
+// Three-stop interpolation with a higher floor (t≥0.18) so even the
+// smallest data values render visibly cyan rather than fading into
+// the no-data baseline.
 function fillForValue(value: number | null, max: number): string {
-  if (value == null || value <= 0) return "#1f2230";
-  if (max <= 0) return "#1f2230";
-  // Log-scale so a small handful of huge markets don't flatten the
-  // rest into invisibility. clamp to [0.05, 1].
+  if (value == null || value <= 0) return "#161a24"; // baseline, near-bg
+  if (max <= 0) return "#161a24";
   const logV = Math.log10(value + 1);
   const logM = Math.log10(max + 1);
-  const t = Math.max(0.05, Math.min(1, logV / logM));
-  // Interpolate from #003a4d (dark cyan) → #00d2ff (bright cyan)
-  const r = Math.round(0 + (0 - 0) * t);
-  const g = Math.round(58 + (210 - 58) * t);
-  const b = Math.round(77 + (255 - 77) * t);
+  const t = Math.max(0.18, Math.min(1, logV / logM));
+  // Three stops:
+  //   0.0 → #06283a  (deep navy-cyan)
+  //   0.5 → #0fa9d9  (mid cyan)
+  //   1.0 → #5cf0ff  (bright near-white cyan)
+  // Linear-blend in two halves of t so the mid-tone holds visual
+  // weight without the gradient flatlining at the top end.
+  const stops = [
+    { t: 0.0, r: 6, g: 40, b: 58 },
+    { t: 0.5, r: 15, g: 169, b: 217 },
+    { t: 1.0, r: 92, g: 240, b: 255 },
+  ];
+  let lo = stops[0];
+  let hi = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i].t && t <= stops[i + 1].t) {
+      lo = stops[i];
+      hi = stops[i + 1];
+      break;
+    }
+  }
+  const localT = (t - lo.t) / Math.max(0.0001, hi.t - lo.t);
+  const r = Math.round(lo.r + (hi.r - lo.r) * localT);
+  const g = Math.round(lo.g + (hi.g - lo.g) * localT);
+  const b = Math.round(lo.b + (hi.b - lo.b) * localT);
   return `rgb(${r}, ${g}, ${b})`;
 }
 
