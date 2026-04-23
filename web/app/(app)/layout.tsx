@@ -1,4 +1,4 @@
-import { getSessionUser } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/auth/session";
 import { ReportViewerProvider } from "@/components/reports/viewer-context";
 import { AppShell } from "./app-shell";
 
@@ -8,11 +8,11 @@ export default async function AppShellLayout({
   children: React.ReactNode;
 }) {
   const user = await getSessionUser();
-  const email = user?.email ?? null;
+  const username = user?.username ?? null;
 
   return (
     <ReportViewerProvider>
-      <AppShell email={email}>{children}</AppShell>
+      <AppShell username={username}>{children}</AppShell>
     </ReportViewerProvider>
   );
 }
