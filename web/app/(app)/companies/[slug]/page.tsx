@@ -655,18 +655,16 @@ export default async function CompanyDetailPage({
       periodCode,
       limit: 10,
     });
-    // Exclude self-compare: the company whose page this is should never
-    // appear as its own peer (Flutter's page was surfacing Flutter
-    // Entertainment AND FanDuel — two rows for the same dollars, since
-    // fanduel.parent_entity_id → flutter means Flutter's group revenue
-    // already folds in FanDuel's US numbers). Also hide the company's
-    // children (operational sub-brands), its parent (a rollup of which
-    // the current page is a subset), and the company's siblings (they
-    // share a parent whose revenue double-counts too).
+    // Hide the company's children (operational sub-brands, already
+    // folded into the parent's rollup revenue) and its parent (the
+    // current page is a subset of the parent's numbers). Keep the
+    // page entity itself — on /companies/flutter the only US
+    // operator-typed peers with revenue rows are Flutter + FanDuel, so
+    // the previous self-exclusion collapsed the widget entirely; this
+    // way Flutter still appears and sits alongside whichever other
+    // real peers the market has.
     const relatedIds = await query<{ id: string }>(
-      `SELECT id FROM entities WHERE id = $1
-       UNION
-       SELECT id FROM entities WHERE parent_entity_id = $1
+      `SELECT id FROM entities WHERE parent_entity_id = $1
        UNION
        SELECT parent_entity_id AS id FROM entities
          WHERE id = $1 AND parent_entity_id IS NOT NULL`,
