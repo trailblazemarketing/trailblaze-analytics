@@ -157,12 +157,15 @@ function PrimaryTile({ kpi }: { kpi: KpiTile }) {
         {isBeacon && kpi.valueFormatted && (
           <sup className="beacon-tm">™</sup>
         )}
-        {kpi.period && kpi.valueFormatted && (
-          <span className="font-mono text-[9px] text-tb-muted">
-            · {kpi.period}
-          </span>
-        )}
       </div>
+      {kpi.period && kpi.valueFormatted && (
+        // Subtitle row below the value so the period caption always renders
+        // — inline flex-baseline rendering could clip on narrow tiles (round
+        // 9 QA on BetMGM Hero). Separate block guarantees visibility.
+        <div className="font-mono text-[9px] text-tb-muted">
+          {kpi.period}
+        </div>
+      )}
       <div className="flex items-center justify-between text-[10px]">
         {kpi.valueFormatted == null ? (
           <span className="text-tb-muted">No data</span>
@@ -236,12 +239,12 @@ function SecondaryTile({ kpi }: { kpi: KpiTile }) {
         {isBeacon && kpi.valueFormatted && (
           <sup className="beacon-tm text-[8px]">™</sup>
         )}
-        {kpi.period && kpi.valueFormatted && (
-          <span className="font-mono text-[8px] text-tb-muted">
-            · {kpi.period}
-          </span>
-        )}
       </div>
+      {kpi.period && kpi.valueFormatted && (
+        <div className="font-mono text-[8px] text-tb-muted">
+          {kpi.period}
+        </div>
+      )}
       {/* B5: dropped per-tile SourceLabel — 4-8 secondary tiles all
           repeating "Trailblaze Report" was clutter. Provenance still lives
           on the primary tile and on the quarterly breakdown rows. */}
