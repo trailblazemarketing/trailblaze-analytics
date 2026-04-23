@@ -101,9 +101,13 @@ const TIME_MATRIX_METRICS = [
   "ftd",
 ];
 
-// Operator leaderboard candidate metrics — fall back to first one with coverage
+// Operator leaderboard candidate metrics — fall back to first one with coverage.
+// `online_revenue` carries entity-attributed UK rows (Entain, Allwyn, Bally's,
+// Bally's Interactive, FDJ United) that `online_ggr` doesn't, so include it
+// in the picker.
 const OPERATOR_LEADERBOARD_METRICS = [
   "online_ggr",
+  "online_revenue",
   "sportsbook_ggr",
   "sportsbook_revenue",
   "casino_ggr",
@@ -245,6 +249,11 @@ export default async function MarketDetailPage({
         marketSlug: market.slug,
         periodCode,
         limit: 25,
+        // Markets page surfaces auto-added entities so the operator
+        // landscape isn't gated on the entity-resolution review backlog
+        // (UK had 16/18 active operators excluded by the default filter:
+        // Bally's, Allwyn, Rank, Super Group, Tombola, Buzz Bingo, etc.).
+        includePending: true,
       }),
       query<{
         id: string;
