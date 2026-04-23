@@ -49,6 +49,7 @@ import {
   formatNative,
   truncateAtSentence,
   formatPeriodLabel,
+  relativeTime,
 } from "@/lib/format";
 import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { query } from "@/lib/db";
@@ -1242,6 +1243,7 @@ interface StockSnap {
   pe_ratio: number | null;
   currency: string | null;
   history: { period_code: string; value: number | null }[];
+  fetched_at: string | null;
 }
 
 async function getStockSnapshot(entityId: string): Promise<StockSnap> {
@@ -1251,9 +1253,10 @@ async function getStockSnapshot(entityId: string): Promise<StockSnap> {
       value: string | null;
       currency: string | null;
       start_date: string;
+      created_at: string;
     }>(
       `SELECT p.code AS period_code, mv.value_numeric::text AS value,
-              mv.currency, p.start_date::text
+              mv.currency, p.start_date::text, mv.created_at::text
        FROM metric_values mv
        JOIN metrics m ON m.id = mv.metric_id
        JOIN periods p ON p.id = mv.period_id
@@ -1339,6 +1342,17 @@ async function getStockSnapshot(entityId: string): Promise<StockSnap> {
       value: r.value != null ? Number(r.value) : null,
     }));
 
+  // Most-recent ingest timestamp across the price rows — represents
+  // when the stock_price metric was last refreshed for this entity.
+  // Renders as "updated X ago" beside the TODAY label so the freshness
+  // is visible (was previously implicit; users had no way to tell if a
+  // weekend stock figure was stale).
+  const fetchedAt = priceRows.reduce<string | null>((latest, r) => {
+    if (!r.created_at) return latest;
+    if (!latest) return r.created_at;
+    return r.created_at > latest ? r.created_at : latest;
+  }, null);
+
   return {
     latest_price: latest,
     prev_price: prev,
@@ -1348,7 +1362,8 @@ async function getStockSnapshot(entityId: string): Promise<StockSnap> {
     ev_ebitda: evmRow[0]?.value != null ? Number(evmRow[0].value) : null,
     pe_ratio: peRow[0]?.value != null ? Number(peRow[0].value) : null,
     currency: priceRows[0]?.currency ?? null,
-  history,
+    history,
+    fetched_at: fetchedAt,
   };
 }
 
@@ -1390,8 +1405,16 @@ function StockRow({
             )}
             <DeltaChip pct={snapshot.day_change_pct} size="xs" />
           </div>
-          <div className="mt-1 text-[9px] uppercase tracking-wider text-tb-muted">
-            Today
+          <div className="mt-1 flex items-center gap-2 text-[9px] uppercase tracking-wider text-tb-muted">
+            <span>Today</span>
+            {snapshot.fetched_at && (
+              <span
+                className="font-mono normal-case tracking-normal text-tb-muted"
+                title={`Stock data ingested ${snapshot.fetched_at}`}
+              >
+                · updated {relativeTime(snapshot.fetched_at)}
+              </span>
+            )}
           </div>
         </div>
       </div>

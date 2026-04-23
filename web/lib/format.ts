@@ -13,6 +13,26 @@ export function toRaw(value: number, mult: UnitMultiplier): number {
   return value * MULT[mult];
 }
 
+// Compact relative-time formatter for "updated X ago" displays. No
+// dependency — covers seconds → weeks; coarser anchors past that point
+// would belong on a calendar date instead. Returns "—" when input
+// can't be parsed.
+export function relativeTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "—";
+  const now = Date.now();
+  const sec = Math.max(0, Math.floor((now - then) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return `${Math.floor(day / 7)}w ago`;
+}
+
 // Standardise the human label for a period across detail-page "AS OF"
 // pills so spacing/casing is consistent regardless of which seed-time
 // `display_name` happens to be on the row. Most period_types already
