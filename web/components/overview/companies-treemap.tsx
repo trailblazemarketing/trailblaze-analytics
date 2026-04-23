@@ -122,21 +122,37 @@ function TreemapCell(props: CellProps) {
   const showLabel = width > 80 && height > 30;
   const showValue = width > 110 && height > 50;
   const showYoy = width > 130 && height > 70;
-  // Char budget is a function of width — small cells get hard truncation
-  // at the inferred budget (≈ 7px per char) and append an ellipsis so a
-  // partial word doesn't read as a complete one (the QA report saw
-  // "Allwyn Interna" without the ellipsis hint).
-  const charBudget = Math.max(6, Math.floor((width - 12) / 7));
+  // Char budget is a function of width. Inter-600 at 11px renders at
+  // ~8px/char worst-case on bold Latin letters — previous formula
+  // (width-12)/7 over-estimated the budget and the SVG clipped
+  // mid-glyph, producing "Allwyn Interna" with no ellipsis hint.
+  // Tighter divisor here guarantees the visible string always fits the
+  // cell, and truncate() appends the ellipsis for any name the cell
+  // cannot fully show. Full name is available on hover via the
+  // Recharts Tooltip above + the <title> SVG element below (belt-and-
+  // suspenders for screen readers / non-JS accessibility).
+  const charBudget = Math.max(6, Math.floor((width - 12) / 8));
   const labelText = truncate(name, charBudget);
   const yoyText =
     yoyPct != null
       ? `YoY ${yoyPct > 0 ? "+" : ""}${yoyPct.toFixed(1)}%`
       : "";
+  // Native SVG tooltip — shows full entity name + current period value +
+  // YoY when the Recharts <Tooltip> above isn't triggered (headless
+  // rendering, screen readers, touch devices that don't hover).
+  const nativeTitle = [
+    name,
+    sizeRaw ? formatEur(sizeRaw) : null,
+    yoyText || null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <g
       style={{ cursor: slug ? "pointer" : "default" }}
       onClick={() => slug && onSelect?.(slug)}
     >
+      <title>{nativeTitle}</title>
       <rect
         x={x}
         y={y}
