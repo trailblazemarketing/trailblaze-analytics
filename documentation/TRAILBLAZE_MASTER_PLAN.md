@@ -1,13 +1,41 @@
 # Trailblaze Analytics — Master Plan
 
-**Last updated:** 2026-04-23 (session 4 close, v7)
+**Last updated:** 2026-04-23 (session 4 close, v8)
 **Supersedes:** all prior master plans
 **Owner:** Andrew, Trailblaze Marketing
-**Status:** End of day 2. Phase 1.1 closed. Phase 2.5 Unit A data layer shipped. UI rounds 4 + 5 + 6 complete. 9 data-layer TODOs catalogued and phase-mapped. Ready for Phase 1.2 + Beacon™ v1 when day 3 starts.
+**Status:** End of day 2. Phase 1.1 closed. Phase 2.5 Unit A data layer shipped. UI rounds 4-6 complete. Round 7 source truth-check in flight. Citation-first product positioning established. Ready for Phase 1.2 + Beacon™ v1 when day 3 starts.
 
 ---
 
-## 1. The architecture, stated once and simply
+## 1. Product positioning — citation-first analytics
+
+**Trailblaze Analytics is a citation-first iGaming terminal. Every displayed number has a source.**
+
+This is the product moat. Not a feature.
+
+**The principle:** every metric value in the DB carries a reference to the source document (filename, page/location, extracted verbatim text). The UI surfaces this as "click to source" on any KPI, chart point, or breakdown value. Users can verify any number they see against the original PDF that produced it.
+
+**What this differentiates against:**
+
+- Bloomberg Terminal, FactSet, S&P Capital IQ — all present numbers from black-box sources. Analysts doing due diligence have to trust the vendor. Trailblaze shows the receipt.
+- Generic scraped-data providers — no provenance. Often wrong, hard to verify.
+- iGaming industry reports (H2GC, Vixio, etc.) — proprietary methodology, no cell-level traceability.
+
+**Architectural implications:**
+
+1. **Parser must preserve source references.** Every `metric_value` row stores `source_id` linking to `reports.id`, plus ideally a JSONB `extraction_context` with page number / table / row identifier where available.
+2. **UI "click to source" everywhere.** Hero KPIs, chart points, breakdown cells, leaderboard rows — all link back to the source PDF with the relevant location highlighted if possible.
+3. **Beacon™ estimates are visually distinct BECAUSE they carry no direct citation.** The contrast between cited (solid line, source link) and estimated (dotted line, methodology tooltip) makes the trust hierarchy visible.
+4. **AI commentary (Phase 5) must cite.** When the model writes "Betsson CEECA grew 12% YoY," it cites the source table. No ungrounded claims.
+5. **Regulator / compliance angle.** Analysts publishing research based on Trailblaze data can point to sourced figures — a non-trivial differentiator for institutional use.
+
+**Ship gate for citation-first:** user clicks any hero KPI on any Company or Market page → opens a side panel or new tab showing the source PDF with the relevant value highlighted or findable via Ctrl-F. Works for 95%+ of displayed values. Remaining 5% are derived (LTM sums, market shares) and show "Derived from: [list of sources]" instead.
+
+**This principle emerged from:** round 7 source truth-check QA (2026-04-23), where Claude in Chrome cycled through pages, opened cited PDFs, and verified displayed values against source content. That workflow revealed that the value isn't in the UI quality alone — it's in the end-to-end chain from PDF text → DB value → UI display, with full traceability at every hop.
+
+---
+
+## 2. The architecture, stated once and simply
 
 Trailblaze Analytics has one primary source of truth: **Oyvind Miller's daily analyst emails**, ingested via Gmail. Everything else is enrichment or output.
 
@@ -23,7 +51,7 @@ Trailblaze Analytics has one primary source of truth: **Oyvind Miller's daily an
 
 ---
 
-## 2. Where we are at end of day 2
+## 3. Where we are at end of day 2
 
 ### Data layer — Phase 2.5 Unit A ✅ COMPLETE
 - 175/175 reports at parser_version 2.1.0, zero errors
@@ -65,7 +93,7 @@ Unit A ship gate partial:
 
 ---
 
-## 3. Known data-layer issues (catalogued, phase-mapped)
+## 4. Known data-layer issues (catalogued, phase-mapped)
 
 **Source:** `documentation/COMPANY_AUDIT_PARSER_TODOS.md` (9 entries, committed `f40b80b` 2026-04-23)
 
@@ -94,7 +122,7 @@ These are intentionally NOT being fixed ad-hoc. Each is routed to the phase that
 
 ---
 
-## 4. The roadmap
+## 5. The roadmap
 
 ### PHASE 1 — Data layer integrity
 
@@ -228,24 +256,25 @@ Beacon™ concretised into three tiers (refined in v5 based on Betsson Q4-25 obs
 
 ---
 
-## 5. Working principles
+## 6. Working principles
 
-1. **Oyvind is canonical.** Only write path is Oyvind + scrapers triggered by Oyvind.
-2. **Old PDF parsing is deprecated.** Ingest = Gmail only.
-3. **Scrapers prioritise by size.** Top 10 entities / markets first.
-4. **Free tier first.** Don't add paid providers until free tier is exhausted.
-5. **Schema blockers land before scrapers.** Metric codes + listing_status + entity_domains must exist first.
-6. **One phase at a time.** Exit gate or no forward movement.
-7. **No UI fixes during active parser reprocess.** Wait for stable data before chasing UI bugs. (Lesson from session 4 — fixing against moving data compounds regressions.)
-8. **One fix class per commit.** Bundled changes create regressions that are hard to bisect.
-9. **Don't drive-by-refactor.** If code looks ugly but works, leave it.
-10. **Commit frequently.** Small commits, clear messages.
-11. **Design docs are the durable record.**
-12. **Claude Code does engineering. Main chat does coordination.**
-13. **Verify handoff claims against live DB.** Never trust, always verify.
-14. **Destructive operations require backup first.** `pg_dump` before mass DELETE.
-15. **Don't reopen closed phases to chase catalogued TODOs.** If a TODO has a phase mapped to it (see §3), wait. Reopening the parser to fix Flutter Q3-25 jeopardises Pattern 1/4 wins and costs another full reprocess.
-16. **Brief size is inversely correlated with fix quality.** Observed pattern across 6 QA rounds:
+1. **Citation-first.** Every displayed number traces to a source document. Parser preserves `source_id` + extraction context on every `metric_value`. UI surfaces "click to source" everywhere. This is the product moat — see §1.
+2. **Oyvind is canonical.** Only write path is Oyvind + scrapers triggered by Oyvind.
+3. **Old PDF parsing is deprecated.** Ingest = Gmail only.
+4. **Scrapers prioritise by size.** Top 10 entities / markets first.
+5. **Free tier first.** Don't add paid providers until free tier is exhausted.
+6. **Schema blockers land before scrapers.** Metric codes + listing_status + entity_domains must exist first.
+7. **One phase at a time.** Exit gate or no forward movement.
+8. **No UI fixes during active parser reprocess.** Wait for stable data before chasing UI bugs. (Lesson from session 4 — fixing against moving data compounds regressions.)
+9. **One fix class per commit.** Bundled changes create regressions that are hard to bisect.
+10. **Don't drive-by-refactor.** If code looks ugly but works, leave it.
+11. **Commit frequently.** Small commits, clear messages.
+12. **Design docs are the durable record.**
+13. **Claude Code does engineering. Main chat does coordination.**
+14. **Verify handoff claims against live DB.** Never trust, always verify.
+15. **Destructive operations require backup first.** `pg_dump` before mass DELETE.
+16. **Don't reopen closed phases to chase catalogued TODOs.** If a TODO has a phase mapped to it (see §4), wait. Reopening the parser to fix Flutter Q3-25 jeopardises Pattern 1/4 wins and costs another full reprocess.
+17. **Brief size is inversely correlated with fix quality.** Observed pattern across 6 QA rounds:
     - Round 2 brief (15 fix classes, broad) → 5 new regressions
     - Round 3 brief (10 fix classes) → 3 new regressions
     - Round 4 brief (11 fix classes + strict one-commit-per-fix) → 0 new regressions but 1 incidental widget disappearance
@@ -254,7 +283,7 @@ Beacon™ concretised into three tiers (refined in v5 based on Betsson Q4-25 obs
 
 ---
 
-## 6. Unit A UI wiring — deferred to Unit D
+## 7. Unit A UI wiring — deferred to Unit D
 
 Unit A shipped the data layer. Three UI components remain unwired and are bundled with Unit D since that session rebuilds entity-type panels anyway:
 
@@ -264,7 +293,7 @@ Unit A shipped the data layer. Three UI components remain unwired and are bundle
 
 ---
 
-## 7. Realistic timeline
+## 8. Realistic timeline
 
 - **Phase 1 finish (1.2 entity canonicalisation):** 1-2 days
 - **Phase 2 pre-blockers (§2.0):** half-day
@@ -284,7 +313,7 @@ Unit A shipped the data layer. Three UI components remain unwired and are bundle
 
 ---
 
-## 8. Claude Code briefs — queued
+## 9. Claude Code briefs — queued
 
 Do NOT kick off until QA round 5 verification completes.
 
@@ -360,7 +389,7 @@ See §6. Unit D session picks up product-split + B2B/B2C + MA toggle at same tim
 
 ---
 
-## 9. Session 4 — commits landed today (2026-04-23)
+## 10. Session 4 — commits landed today (2026-04-23)
 
 QA round 4 follow-up (12 commits, zero regressions):
 - `c48c7d1` — Heatmap no-data fill + zoom polish
@@ -410,7 +439,7 @@ Earlier session 4:
 
 ---
 
-## 10. Change log
+## 11. Change log
 
 - **v1** — initial plan (morning)
 - **v2** — synthetic delete + Unit A briefs
@@ -418,7 +447,8 @@ Earlier session 4:
 - **v4** — absorbed 5 source catalogue findings, Phase 2 reordered
 - **v5** — Unit A complete, Beacon™ refined into v1/v2/v3 with gap-fill as concrete first feature
 - **v6** — round 4 fix sweep complete with zero regressions; 9 data-layer TODOs explicitly phase-mapped (§3); new §4.5 for small parser sanitiser tasks; Unit A UI wiring gaps bundled to Unit D (§6); working principle 15 added (don't reopen closed phases for catalogued TODOs)
-- **v7 (current)** — QA round 5 verified 8/9 round-4 fixes PASS, 1 PARTIAL (Flutter Competitive Position widget disappeared — surgical round 6 fix drafted); 2 TODOs incidentally improved (Italy ™ glyph, UK evoke dedup); Beacon™ v1 priority candidates identified (BetMGM strongest, Betsson single-gap); working principle 16 added (brief size vs fix quality — prefer small surgical briefs over large sweeping ones)
+- **v7** — QA round 5 verified 8/9 round-4 fixes PASS, 1 PARTIAL (Flutter Competitive Position widget disappeared — surgical round 6 fix drafted); 2 TODOs incidentally improved (Italy ™ glyph, UK evoke dedup); Beacon™ v1 priority candidates identified (BetMGM strongest, Betsson single-gap); working principle 16 added (brief size vs fix quality — prefer small surgical briefs over large sweeping ones)
+- **v8 (current)** — round 7 source truth-check QA triggered the realisation: citation-first IS the product. New §1 elevates citation-first from implicit feature to explicit product positioning and architectural principle. Working principles list reopens with "Citation-first" as #1. Implication: every future feature (Beacon™, AI commentary, news module) must respect the citation chain from source PDF → DB value → UI display.
 
 ---
 
