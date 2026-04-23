@@ -13,6 +13,36 @@ export function toRaw(value: number, mult: UnitMultiplier): number {
   return value * MULT[mult];
 }
 
+// Standardise the human label for a period across detail-page "AS OF"
+// pills so spacing/casing is consistent regardless of which seed-time
+// `display_name` happens to be on the row. Most period_types already
+// have a clean display_name (FY 2025, H1 2025, Q1 2026, Jan 2026,
+// 9M 2025, YTD Mar 2026). LTM is the awkward case: codes like
+// LTM-Q1-25 render as "LTM Q1 2025" which reads ambiguously, so we
+// promote them to "LTM (ending Q1 2025)" for transparency on the
+// rolling-window endpoint. Everything else falls through to the
+// display_name with the code as a final fallback.
+export function formatPeriodLabel(
+  code: string,
+  displayName?: string | null,
+): string {
+  // LTM-Q1-25 / LTM-Q2-25 / LTM-25 patterns
+  if (code.startsWith("LTM")) {
+    const tail = code.slice(4); // strip "LTM-"
+    // LTM-Q1-25 → "Q1 2025"; LTM-25 → "2025"
+    const qMatch = tail.match(/^(Q[1-4])-(\d{2})$/);
+    if (qMatch) {
+      const qLabel = qMatch[1];
+      const yr = `20${qMatch[2]}`;
+      return `LTM (ending ${qLabel} ${yr})`;
+    }
+    const yMatch = tail.match(/^(\d{2})$/);
+    if (yMatch) return `LTM (ending ${`20${yMatch[1]}`})`;
+    // Fall back to whatever display_name carries
+  }
+  return displayName ?? code;
+}
+
 // Truncate a long body of text near `maxLen` chars, but preferring the
 // last full sentence within the limit so excerpts don't trail off
 // mid-word ("...at the time of the CMD i..." → "...at the time of the

@@ -43,7 +43,13 @@ import { PeriodSelector } from "@/components/layout/period-selector";
 import { ReportLink } from "@/components/reports/report-link";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TH, TD, TR } from "@/components/ui/table";
-import { formatDate, formatEur, formatNative, truncateAtSentence } from "@/lib/format";
+import {
+  formatDate,
+  formatEur,
+  formatNative,
+  truncateAtSentence,
+  formatPeriodLabel,
+} from "@/lib/format";
 import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { query } from "@/lib/db";
 import type { MetricValueRow } from "@/lib/types";
@@ -697,15 +703,22 @@ export default async function CompanyDetailPage({
   // the original "As of" date often pinned to active_customers' or
   // arpu's stalest snapshot rather than the freshest aggregate).
   let latestPeriodEnd: string | null = null;
-  let headerPeriod: string | null = null;
+  let headerCode: string | null = null;
+  let headerDisplay: string | null = null;
   for (const rows of byCodeAug.values()) {
     for (const r of rows) {
       if (r.period_end && (!latestPeriodEnd || r.period_end > latestPeriodEnd)) {
         latestPeriodEnd = r.period_end;
-        headerPeriod = r.period_display_name ?? r.period_code;
+        headerCode = r.period_code;
+        headerDisplay = r.period_display_name ?? r.period_code;
       }
     }
   }
+  // Standardise via formatPeriodLabel so LTM windows render as
+  // "LTM (ending Q1 2025)" consistently with the markets page.
+  const headerPeriod = headerCode
+    ? formatPeriodLabel(headerCode, headerDisplay)
+    : null;
 
   return (
     <div className="space-y-3">

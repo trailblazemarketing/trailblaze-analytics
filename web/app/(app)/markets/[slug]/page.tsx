@@ -37,7 +37,12 @@ import {
   type TimeseriesPoint,
   type BeaconFlags,
 } from "@/components/charts/metric-timeseries";
-import { formatDate, formatMetricValueEur, truncateAtSentence } from "@/lib/format";
+import {
+  formatDate,
+  formatMetricValueEur,
+  truncateAtSentence,
+  formatPeriodLabel,
+} from "@/lib/format";
 import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { query } from "@/lib/db";
 import type { MetricValueRow } from "@/lib/types";
@@ -526,11 +531,26 @@ export default async function MarketDetailPage({
     .filter(Boolean)
     .join(" · ");
 
-  // Header period label — use the latest period from the scorecard data
-  const headerPeriod =
-    Array.from(byCode.values())[0]?.[0]?.period_display_name ??
-    Array.from(byCode.values())[0]?.[0]?.period_code ??
-    undefined;
+  // Header period label — use the latest period across all scorecard
+  // series (not just whichever is first in alphabetical insertion
+  // order from getScorecardSeries). Standardised via formatPeriodLabel
+  // so LTM-Q1-25 reads as "LTM (ending Q1 2025)" consistently across
+  // Company + Market detail pages.
+  let latestEnd: string | null = null;
+  let headerCode: string | null = null;
+  let headerDisplay: string | null = null;
+  for (const rs of byCode.values()) {
+    for (const r of rs) {
+      if (r.period_end && (!latestEnd || r.period_end > latestEnd)) {
+        latestEnd = r.period_end;
+        headerCode = r.period_code;
+        headerDisplay = r.period_display_name ?? r.period_code;
+      }
+    }
+  }
+  const headerPeriod = headerCode
+    ? formatPeriodLabel(headerCode, headerDisplay)
+    : undefined;
 
   return (
     <div className="space-y-3">
