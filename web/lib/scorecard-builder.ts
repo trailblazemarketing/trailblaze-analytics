@@ -6,10 +6,11 @@ import type { KpiTile } from "@/components/primitives/scorecard";
 import type { CanonicalRow } from "@/lib/queries/analytics";
 import {
   nativeToEur,
+  nativeToEurInferred,
   toRawNumeric,
   yoyPctGated,
 } from "@/lib/queries/analytics";
-import { formatMetricValueEur } from "@/lib/format";
+import { formatMetricValueEur, inferUnitMultiplier } from "@/lib/format";
 import type {
   BeaconEstimate,
   MetricValueRow,
@@ -200,7 +201,7 @@ export function buildKpiTile(
     .slice(-8)
     .map((r) =>
       isCurrency
-        ? nativeToEur(r.value_numeric, r.unit_multiplier, r.eur_rate)
+        ? nativeToEurInferred(r.value_numeric, r.unit_multiplier, r.eur_rate, r.metric_code)
         : toRawNumeric(r.value_numeric, r.unit_multiplier),
     );
   const beaconMask = [...rows]
@@ -212,13 +213,27 @@ export function buildKpiTile(
         r.disclosure_status === "derived",
     );
 
+  // Defensive multiplier inference: some extraction paths (notably US
+  // state regulator rows attached at the market level — online_ggr,
+  // ggr, casino_revenue on /markets/us-new-jersey) carry
+  // unit_multiplier=NULL despite the value being millions of the
+  // reported currency. Without this step the formatter renders
+  // "€236.65" instead of "€236.65M". Parser root-cause tracked in
+  // COMPANY_AUDIT_PARSER_TODOS.md; this inference is the defensive
+  // display-layer fallback that also protects every other market page
+  // with the same data shape.
+  const inferredMult = inferUnitMultiplier(
+    latest.value_numeric != null ? Number(latest.value_numeric) : null,
+    latest.metric_code,
+    latest.unit_multiplier,
+  );
   const { display, tooltip } = formatMetricValueEur(
     {
       value_numeric: latest.value_numeric,
       value_text: latest.value_text,
       metric_unit_type: latest.metric_unit_type,
       currency: latest.currency,
-      unit_multiplier: latest.unit_multiplier,
+      unit_multiplier: inferredMult,
     },
     latest.eur_rate,
   );
