@@ -16,6 +16,7 @@ import type { LeaderboardRow } from "@/components/primitives/leaderboard";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { Input } from "@/components/ui/input";
 import { formatEur } from "@/lib/format";
+import { ApplyButton } from "@/components/ui/apply-button";
 
 export const dynamic = "force-dynamic";
 
@@ -211,12 +212,7 @@ export default async function MarketsIndexPage({
             </option>
           ))}
         </select>
-        <button
-          type="submit"
-          className="h-8 rounded-md bg-tb-blue px-3 text-xs font-medium text-white hover:brightness-110"
-        >
-          Apply
-        </button>
+        <ApplyButton>Apply</ApplyButton>
         {(searchParams.q ||
           searchParams.type ||
           searchParams.country ||

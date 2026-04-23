@@ -13,6 +13,7 @@ import { adaptEntityLeaderboardRows } from "@/lib/adapters";
 import { Leaderboard } from "@/components/primitives/leaderboard";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { Input } from "@/components/ui/input";
+import { ApplyButton } from "@/components/ui/apply-button";
 import { formatEur } from "@/lib/format";
 import {
   CompanyTreemap,
@@ -238,12 +239,7 @@ export default async function CompaniesIndexPage({
           />
           Show pending
         </label>
-        <button
-          type="submit"
-          className="h-8 rounded-md bg-tb-blue px-3 text-xs font-medium text-white hover:brightness-110"
-        >
-          Apply
-        </button>
+        <ApplyButton>Apply</ApplyButton>
         {(searchParams.q ||
           searchParams.type ||
           searchParams.country ||
