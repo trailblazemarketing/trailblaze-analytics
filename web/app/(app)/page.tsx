@@ -115,7 +115,7 @@ export default async function HomePage({
   // operator counts. Filtered to rows with a usable iso_country (the
   // map keys by ISO numeric → alpha-2; markets without alpha-2 codes
   // can't be coloured).
-  const mapPoints = (await countryMapPoints())
+  const nativeMapPoints = (await countryMapPoints())
     .filter((p) => p.isoCountry)
     .map((p) => ({
       iso2: p.isoCountry as string,
@@ -126,6 +126,35 @@ export default async function HomePage({
       operatorCount: p.operatorCount,
       latestPeriodCode: p.latestPeriodCode,
     }));
+  // Augment the native country-scope map with country rollups so
+  // markets like Canada (whose data lives at the province scope and
+  // is summed by getCountryRollupValues) also render shaded on the
+  // world heatmap. Native rows win when both exist; rollup fills the
+  // gap. We need iso_country for the map lookup — fetch via a tiny
+  // join against the markets table for the rollup rows.
+  const rollupIsoLookup = await query<{ market_id: string; iso_country: string | null }>(
+    `SELECT id AS market_id, iso_country
+     FROM markets
+     WHERE market_type = 'country'`,
+  );
+  const isoByMarketId = new Map(
+    rollupIsoLookup.map((r) => [r.market_id, r.iso_country]),
+  );
+  const nativeIso2 = new Set(nativeMapPoints.map((p) => p.iso2));
+  const rollupMapPoints = countryRollup
+    .map((r) => ({
+      iso2: isoByMarketId.get(r.market_id) ?? null,
+      slug: r.slug,
+      name: r.name,
+      onlineGgrEur: r.latest_value_eur,
+      yoyPct: null as number | null,
+      operatorCount: 0,
+      latestPeriodCode: r.latest_period,
+    }))
+    .filter((p): p is typeof p & { iso2: string } =>
+      p.iso2 != null && !nativeIso2.has(p.iso2),
+    );
+  const mapPoints = [...nativeMapPoints, ...rollupMapPoints];
 
   // Compute hero YoYs only when both sides are present and within bounds
   function heroYoy(eur: number, prev: number | null): number | null {
