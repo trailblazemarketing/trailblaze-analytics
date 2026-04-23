@@ -236,6 +236,45 @@ export default async function CompanyDetailPage({
     if (promoted !== rs) byCodeAug.set(code, promoted);
   }
 
+  // CD-DEDUP: When an aggregate tile's headline EUR value is within 1%
+  // of its online-only counterpart for the same period, the source only
+  // disclosed online and the parser likely cloned it into the aggregate
+  // metric (NGR ≈ Online NGR, Revenue ≈ Online Revenue, GGR ≈ Online
+  // GGR). Showing both tiles with identical numbers misleads — suppress
+  // the aggregate (em-dash). Mirror of markets-page commit dd077df.
+  const TOTAL_VS_ONLINE_PAIRS: [string, string][] = [
+    ["revenue", "online_revenue"],
+    ["ngr", "online_ngr"],
+    ["ggr", "online_ggr"],
+  ];
+  for (const [totalCode, onlineCode] of TOTAL_VS_ONLINE_PAIRS) {
+    const totalRows = byCodeAug.get(totalCode) ?? [];
+    const onlineRows = byCodeAug.get(onlineCode) ?? [];
+    if (totalRows.length === 0 || onlineRows.length === 0) continue;
+    const totalLatest = totalRows[0];
+    const onlineMatch = onlineRows.find(
+      (r) => r.period_code === totalLatest.period_code,
+    );
+    if (!onlineMatch) continue;
+    const totalEur = nativeToEur(
+      totalLatest.value_numeric,
+      totalLatest.unit_multiplier,
+      totalLatest.eur_rate,
+    );
+    const onlineEur = nativeToEur(
+      onlineMatch.value_numeric,
+      onlineMatch.unit_multiplier,
+      onlineMatch.eur_rate,
+    );
+    if (
+      totalEur != null &&
+      onlineEur != null &&
+      Math.abs(totalEur - onlineEur) / Math.max(Math.abs(totalEur), 1) < 0.01
+    ) {
+      byCodeAug.set(totalCode, []);
+    }
+  }
+
   const allBeaconIds: string[] = [];
   byCodeAug.forEach((rows) => {
     for (const r of rows) {
