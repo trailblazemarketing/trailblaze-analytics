@@ -161,7 +161,11 @@ export default async function MarketDetailPage({
   const periodGroups = groupPeriodsForSelector(populatedPeriods);
 
   // Recent periods scoped to this market — keeps the matrix focused on
-  // periods this market actually reports in.
+  // periods this market actually reports in. Pulled wide (no LIMIT, just
+  // a sane cap) across the candidate cadences so the cadence picker
+  // below can pick the best single cohort. Excludes `ltm` and
+  // `nine_months` (overlapping aggregates that confuse a breakdown
+  // table) and `custom` / `trading_update_window`.
   const tmPeriodsRaw = await query<{
     code: string;
     display_name: string | null;
@@ -173,14 +177,41 @@ export default async function MarketDetailPage({
      WHERE p.id IN (
        SELECT DISTINCT period_id FROM metric_values WHERE market_id = $1
      )
-       AND p.period_type IN ('month','quarter','full_year','half_year','ltm')
+       AND p.period_type IN ('quarter','half_year','full_year','month')
      ORDER BY p.start_date DESC
-     LIMIT 12`,
+     LIMIT 60`,
     [market.id],
   );
-  const tmPeriods = tmPeriodsRaw.sort((a, b) =>
-    a.start_date.localeCompare(b.start_date),
-  );
+
+  // Cadence picker — same pattern as commit ccd35e4 on the chart, applied
+  // to the breakdown matrix. Preferred cadence = quarter; fall back to
+  // half_year, then full_year, finally month so US states (which report
+  // monthly only) still render. Take the most recent N within the cohort,
+  // then sort ascending for chronological left-to-right.
+  const TM_CADENCE_PREF: {
+    pt: "quarter" | "half_year" | "full_year" | "month";
+    label: string;
+    n: number;
+  }[] = [
+    { pt: "quarter", label: "Quarters", n: 12 },
+    { pt: "half_year", label: "Half-years", n: 8 },
+    { pt: "full_year", label: "Years", n: 6 },
+    { pt: "month", label: "Months", n: 12 },
+  ];
+  let tmPeriods: typeof tmPeriodsRaw = [];
+  let tmCadenceLabel = "Periods";
+  let tmCadenceN = 12;
+  for (const { pt, label, n } of TM_CADENCE_PREF) {
+    const cohort = tmPeriodsRaw.filter((p) => p.period_type === pt);
+    if (cohort.length >= 3) {
+      tmPeriods = cohort
+        .slice(0, n) // already DESC by start_date — newest n
+        .sort((a, b) => a.start_date.localeCompare(b.start_date));
+      tmCadenceLabel = label;
+      tmCadenceN = tmPeriods.length;
+      break;
+    }
+  }
   const periodCodes = tmPeriods.map((p) => p.code);
   const periodLabels = Object.fromEntries(
     tmPeriods.map((p) => [p.code, p.display_name ?? p.code]),
@@ -642,7 +673,7 @@ export default async function MarketDetailPage({
         />
 
         <TimeMatrix
-          title={`${market.name} — last 12 periods`}
+          title={`${market.name} — last ${tmCadenceN} ${tmCadenceLabel.toLowerCase()}`}
           periods={periodCodes}
           periodLabels={periodLabels}
           rows={tmRows}
