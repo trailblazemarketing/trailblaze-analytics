@@ -42,6 +42,8 @@ import {
   sumLatestPerMarket,
   topEntitiesByRevenue,
   countryMapPoints,
+  recentCommentaryCards,
+  biggestMovers,
 } from "@/lib/queries/overview";
 import { CompaniesTreemap } from "@/components/overview/companies-treemap";
 import { WorldHeatmap } from "@/components/overview/world-heatmap";
@@ -135,6 +137,12 @@ export default async function HomePage({
       entityType: e.entityType,
       yoyPct: e.yoyPct,
     }));
+  // Bottom-band content for the redesign — fetched here so they're
+  // included in the same Promise-driven page render rather than waterfall.
+  const [commentaryCards, moverRows] = await Promise.all([
+    recentCommentaryCards(3),
+    biggestMovers(5),
+  ]);
   // World heatmap — country-scope online_ggr per market with YoY +
   // operator counts. Filtered to rows with a usable iso_country (the
   // map keys by ISO numeric → alpha-2; markets without alpha-2 codes
@@ -358,6 +366,16 @@ export default async function HomePage({
               viewAllHref="/companies?type=operator"
             />
           </aside>
+        </div>
+
+        {/* Bottom band — three equal-width columns: Recent Commentary
+            (3 cards), Data Drops (compact list), Biggest Movers (top
+            5 by abs(YoY%) within the post-Fix-A bounds). The brief's
+            command-centre layout. */}
+        <div className="grid items-start gap-3 lg:grid-cols-3">
+          <RecentCommentaryColumn cards={commentaryCards} />
+          <DataDropsCard drops={dataDrops} />
+          <BiggestMoversCard rows={moverRows} />
         </div>
 
         {/* Panel A + B: Markets leaderboard (2/3) · Right column stacked (1/3)
@@ -686,6 +704,140 @@ async function getDataDrops(limit = 6): Promise<DataDropRow[]> {
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
   return drops.slice(0, limit);
+}
+
+// Recent Commentary column — three cards, one per most-recent
+// narrative from analyst-note / trailblaze-pdf / industry-trade
+// sources. Each card shows the entity (or market) name, a date, the
+// first ~120 chars of the body, and a "read more →" link to the
+// source report.
+function RecentCommentaryColumn({
+  cards,
+}: {
+  cards: import("@/lib/queries/overview").CommentaryCard[];
+}) {
+  return (
+    <div className="rounded-md border border-tb-border bg-tb-surface">
+      <div className="border-b border-tb-border px-3 py-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+          Recent commentary
+        </h3>
+        <p className="mt-0.5 text-[10px] text-tb-muted">
+          Latest analyst notes across covered entities + markets
+        </p>
+      </div>
+      {cards.length === 0 ? (
+        <p className="p-4 text-[11px] text-tb-muted">
+          No recent commentary indexed.
+        </p>
+      ) : (
+        <ul className="divide-y divide-tb-border/60">
+          {cards.map((c) => {
+            const subject = c.entityName ?? c.marketName ?? "—";
+            const dt = c.publishedAt ? new Date(c.publishedAt) : null;
+            const dateLabel = dt
+              ? dt.toLocaleDateString(undefined, {
+                  month: "short",
+                  year: "numeric",
+                })
+              : "";
+            const snippet =
+              c.content.length > 140
+                ? c.content.slice(0, 140).replace(/\s+\S*$/, "") + "…"
+                : c.content;
+            return (
+              <li key={c.id} className="p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-[11px] font-semibold text-tb-text">
+                    {subject}
+                  </span>
+                  <span className="shrink-0 font-mono text-[9px] text-tb-muted">
+                    {dateLabel}
+                  </span>
+                </div>
+                <p className="mt-1 text-[10px] leading-relaxed text-tb-muted">
+                  {snippet}
+                </p>
+                <ReportLink
+                  reportId={c.reportId}
+                  className="mt-1.5 inline-block text-[10px] text-tb-blue hover:underline"
+                >
+                  read more →
+                </ReportLink>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// Biggest Movers — small table, top 5 entities ranked by abs(YoY%)
+// within the post-Fix-A bounds. Positive movement renders with the
+// success colour, negative with danger; revenue cell shows EUR.
+function BiggestMoversCard({
+  rows,
+}: {
+  rows: import("@/lib/queries/overview").MoverRow[];
+}) {
+  return (
+    <div className="rounded-md border border-tb-border bg-tb-surface">
+      <div className="border-b border-tb-border px-3 py-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+          Biggest movers
+        </h3>
+        <p className="mt-0.5 text-[10px] text-tb-muted">
+          Top {rows.length} entities by |YoY %| · revenue cadence-matched
+        </p>
+      </div>
+      {rows.length === 0 ? (
+        <p className="p-4 text-[11px] text-tb-muted">
+          No comparable revenue periods yet.
+        </p>
+      ) : (
+        <table className="w-full text-[11px]">
+          <thead className="text-[9px] uppercase tracking-wider text-tb-muted">
+            <tr>
+              <th className="px-3 py-1.5 text-left">Entity</th>
+              <th className="px-3 py-1.5 text-right font-mono">Revenue</th>
+              <th className="px-3 py-1.5 text-right font-mono">YoY</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-tb-border/60">
+            {rows.map((r) => (
+              <tr key={r.slug} className="hover:bg-tb-border/20">
+                <td className="px-3 py-1.5">
+                  <Link
+                    href={`/companies/${r.slug}`}
+                    className="text-tb-text hover:text-tb-blue"
+                  >
+                    {r.name}
+                  </Link>
+                </td>
+                <td className="px-3 py-1.5 text-right font-mono text-tb-text">
+                  {formatEur(r.revenueEur)}
+                </td>
+                <td
+                  className={
+                    "px-3 py-1.5 text-right font-mono " +
+                    (r.yoyPct > 0
+                      ? "text-tb-success"
+                      : r.yoyPct < 0
+                        ? "text-tb-danger"
+                        : "text-tb-muted")
+                  }
+                >
+                  {r.yoyPct > 0 ? "+" : ""}
+                  {r.yoyPct.toFixed(1)}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 }
 
 function LegendDot({ color, label }: { color: string; label: string }) {
