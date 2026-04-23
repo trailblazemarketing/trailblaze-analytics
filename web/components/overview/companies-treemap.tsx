@@ -76,10 +76,13 @@ export function CompaniesTreemap({
   );
 }
 
-// Custom cell — Recharts gives x/y/width/height/index/depth/payload.
-// We render coloured rect + label only when the cell is large enough
-// for the label to be legible (>~80px wide and >~30px tall). Click
-// navigates to /companies/<slug>.
+// Custom cell — Recharts spreads the leaf node's data fields directly
+// onto the cell-content props (NOT nested under `payload` for Treemap
+// in Recharts 2.x — that was the cause of every cell rendering €0.00,
+// since `payload?.size` was always undefined and the formatter
+// interpreted that as 0). Read fields from props directly with
+// `value` (Recharts' computed dataKey value) as the size source-of-
+// truth, falling back to the original `size` if Recharts changes.
 type CellProps = {
   x?: number;
   y?: number;
@@ -87,29 +90,52 @@ type CellProps = {
   height?: number;
   depth?: number;
   index?: number;
+  // Spread by Recharts from the leaf node:
   name?: string;
-  payload?: TreemapDatum;
+  value?: number; // computed from dataKey
+  size?: number; // original
+  slug?: string;
+  entityType?: string | null;
+  yoyPct?: number | null;
+  payload?: Partial<TreemapDatum>;
   onSelect?: (slug: string) => void;
 };
 
 function TreemapCell(props: CellProps) {
-  const { x = 0, y = 0, width = 0, height = 0, depth = 0, payload, onSelect } = props;
+  const { x = 0, y = 0, width = 0, height = 0, depth = 0, onSelect } = props;
   if (depth === 0) return null; // root container
-  const datum = payload as TreemapDatum | undefined;
-  const fill = datum?.entityType
-    ? (COLOR_BY_TYPE[datum.entityType] ?? FALLBACK)
+  // Read every datum field with multi-source fallback. `value` is the
+  // canonical numeric (Recharts uses dataKey to populate it); `size`
+  // is the original. Strings + extra fields come straight off props or
+  // through payload.
+  const name = props.name ?? props.payload?.name ?? "";
+  const slug = props.slug ?? props.payload?.slug;
+  const entityType = props.entityType ?? props.payload?.entityType ?? null;
+  const yoyPct = props.yoyPct ?? props.payload?.yoyPct ?? null;
+  const sizeRaw = props.value ?? props.size ?? props.payload?.size ?? 0;
+  const fill = entityType
+    ? (COLOR_BY_TYPE[entityType] ?? FALLBACK)
     : FALLBACK;
+  // Label visibility scales: only render text when there is room for
+  // it. Cells smaller than the threshold render plain coloured rects
+  // (still hoverable for tooltip).
   const showLabel = width > 80 && height > 30;
   const showValue = width > 110 && height > 50;
   const showYoy = width > 130 && height > 70;
+  // Char budget is a function of width — small cells get hard truncation
+  // at the inferred budget (≈ 7px per char) and append an ellipsis so a
+  // partial word doesn't read as a complete one (the QA report saw
+  // "Allwyn Interna" without the ellipsis hint).
+  const charBudget = Math.max(6, Math.floor((width - 12) / 7));
+  const labelText = truncate(name, charBudget);
   const yoyText =
-    datum?.yoyPct != null
-      ? `YoY ${datum.yoyPct > 0 ? "+" : ""}${datum.yoyPct.toFixed(1)}%`
+    yoyPct != null
+      ? `YoY ${yoyPct > 0 ? "+" : ""}${yoyPct.toFixed(1)}%`
       : "";
   return (
     <g
-      style={{ cursor: datum?.slug ? "pointer" : "default" }}
-      onClick={() => datum?.slug && onSelect?.(datum.slug)}
+      style={{ cursor: slug ? "pointer" : "default" }}
+      onClick={() => slug && onSelect?.(slug)}
     >
       <rect
         x={x}
@@ -132,7 +158,7 @@ function TreemapCell(props: CellProps) {
           fontWeight={600}
           fontFamily="Inter, sans-serif"
         >
-          {truncate(datum?.name ?? "", Math.max(8, Math.floor(width / 7)))}
+          {labelText}
         </text>
       )}
       {showValue && (
@@ -144,7 +170,7 @@ function TreemapCell(props: CellProps) {
           fontFamily="JetBrains Mono, monospace"
           opacity={0.85}
         >
-          {formatEur(datum?.size ?? 0)}
+          {formatEur(sizeRaw)}
         </text>
       )}
       {showYoy && yoyText && (
