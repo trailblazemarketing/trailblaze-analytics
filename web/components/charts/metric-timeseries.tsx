@@ -151,7 +151,7 @@ export function MetricTimeseries({
                 );
               }}
               activeDot={{ r: 4, fill: color }}
-              connectNulls
+              connectNulls={false}
               strokeDasharray={
                 // If EVERY point in this series is beacon, dot the whole line.
                 beaconFlags?.[s.key] &&

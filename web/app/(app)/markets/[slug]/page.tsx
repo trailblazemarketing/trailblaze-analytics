@@ -45,6 +45,7 @@ import {
   nativeToEur,
   toRawNumeric,
   deriveLtmFromTrailingQuarters,
+  fillCadenceGaps,
 } from "@/lib/queries/analytics";
 
 export const dynamic = "force-dynamic";
@@ -442,7 +443,7 @@ export default async function MarketDetailPage({
       a.period_start.localeCompare(b.period_start),
     );
     chartLabel = rs[0]?.metric_display_name ?? chartMetricCode;
-    chartData = rs.map((r) => ({
+    const dense: TimeseriesPoint[] = rs.map((r) => ({
       period: r.period_code,
       period_start: r.period_start,
       [chartLabel]:
@@ -450,6 +451,16 @@ export default async function MarketDetailPage({
           ? nativeToEur(r.value_numeric, r.unit_multiplier, r.eur_rate)
           : toRawNumeric(r.value_numeric, r.unit_multiplier),
     }));
+    const ptForCadence: "quarter" | "half_year" | "full_year" =
+      chartCadenceLabel === "Quarterly"
+        ? "quarter"
+        : chartCadenceLabel === "Half-Year"
+        ? "half_year"
+        : "full_year";
+    // Insert null entries at missing period slots so the line breaks
+    // visibly at gaps (Recharts connectNulls={false}) instead of
+    // smoothing across — see commit B above for the rationale.
+    chartData = fillCadenceGaps(dense, ptForCadence, [chartLabel]);
     chartBeaconFlags = {
       [chartLabel]: new Set(
         rs

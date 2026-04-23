@@ -12,6 +12,7 @@ import {
   nativeToEur,
   toRawNumeric,
   preferAggregateForCurrencyTile,
+  fillCadenceGaps,
 } from "@/lib/queries/analytics";
 import {
   listPopulatedPeriods,
@@ -313,7 +314,13 @@ export default async function CompanyDetailPage({
     a.period_start.localeCompare(b.period_start),
   );
   const chartRows = sortedRev.slice(-12);
-  const chartData: TimeseriesPoint[] = chartRows.map((r) => ({
+  const chartCadence: "quarter" | "half_year" | "full_year" =
+    cadenceLabel === "Quarterly"
+      ? "quarter"
+      : cadenceLabel === "Half-Year"
+      ? "half_year"
+      : "full_year";
+  const chartDataDense: TimeseriesPoint[] = chartRows.map((r) => ({
     period: r.period_code,
     period_start: r.period_start,
     Revenue:
@@ -321,6 +328,11 @@ export default async function CompanyDetailPage({
         ? nativeToEur(r.value_numeric, r.unit_multiplier, r.eur_rate)
         : toRawNumeric(r.value_numeric, r.unit_multiplier),
   }));
+  // Insert null entries at missing period slots so the chart renders
+  // broken segments at gaps (Recharts connectNulls={false}) instead of
+  // smoothing across — e.g. BetMGM Q4-25 missing between Q3-25 and
+  // Q1-26 should visibly break the line, not draw straight through.
+  const chartData = fillCadenceGaps(chartDataDense, chartCadence, ["Revenue"]);
   const beaconFlags: BeaconFlags = {
     Revenue: new Set(
       chartRows

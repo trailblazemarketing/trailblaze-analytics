@@ -538,6 +538,53 @@ export function nativeToEur(
   return raw / r;
 }
 
+// Inject explicit null entries for missing periods between the first
+// and last data point in a chronologically-sorted chart series, so
+// Recharts can render the line as broken segments at gaps (with
+// connectNulls={false}) rather than smoothing a straight segment
+// across a missing quarter and implying continuity.
+//
+// `cadence` controls the spacing in months: quarter=3, half_year=6,
+// full_year=12, month=1. Returns a new array; the input is not
+// mutated. The synthesised gap rows carry period_start so they sort
+// correctly, period code "gap-N" so they're distinguishable in
+// payloads, and the value keys set to null so the chart treats them
+// as missing.
+export function fillCadenceGaps<T extends { period: string; period_start: string }>(
+  rows: T[],
+  cadence: "quarter" | "half_year" | "full_year" | "month",
+  valueKeys: string[],
+): T[] {
+  if (rows.length < 2) return rows;
+  const monthsPerStep =
+    cadence === "month" ? 1 : cadence === "quarter" ? 3 : cadence === "half_year" ? 6 : 12;
+  const result: T[] = [];
+  let gapId = 0;
+  for (let i = 0; i < rows.length; i++) {
+    result.push(rows[i]);
+    if (i === rows.length - 1) break;
+    const cur = new Date(rows[i].period_start);
+    const next = new Date(rows[i + 1].period_start);
+    const monthsApart =
+      (next.getFullYear() - cur.getFullYear()) * 12 +
+      (next.getMonth() - cur.getMonth());
+    if (monthsApart > monthsPerStep) {
+      const numMissing = Math.floor(monthsApart / monthsPerStep) - 1;
+      for (let m = 1; m <= numMissing; m++) {
+        const gapDate = new Date(cur);
+        gapDate.setMonth(cur.getMonth() + m * monthsPerStep);
+        const gapRow = {
+          period: `gap-${gapId++}`,
+          period_start: gapDate.toISOString().slice(0, 10),
+        } as T;
+        for (const k of valueKeys) (gapRow as Record<string, unknown>)[k] = null;
+        result.push(gapRow);
+      }
+    }
+  }
+  return result;
+}
+
 // Derive an LTM row by summing the 4 most-recent consecutive quarter
 // rows. Returns null when fewer than 4 quarters exist, when they
 // aren't strictly consecutive (~90-day gaps), or when any value can't
