@@ -804,3 +804,31 @@ fixes for the rest of the report shipped as Fix Classes A-R in commits
 ## Issue: /markets Beacon™ coverage still 0% on most rows
 - Expected — Beacon methodology is Phase 4.2, not yet implemented.
 - No-op until then.
+
+---
+
+## Overnight v2 decision: Italy operator recogniser (Sanitiser 3.4)
+
+Deferred. Round 9 brief asked for an optional Option B inline expansion
+of Pattern 4 to recognise Italian operators (Lottomatica, Sisal,
+Snaitech). Per the brief's decision rule ("if Option B requires
+touching prompts.py for more than one recogniser, choose Option A and
+log TODO") and overnight risk discipline, I chose Option A.
+
+Scope expansion beyond brief boundary: extending Pattern 4's
+market-name clause from "must name a US state" to "US state OR Italian
+market name" risks reprocessing regressing the 6,422 existing US
+state × operator cells — and the overnight dry-run would not have real
+visibility into Italy outputs without also hand-constructing Italian
+fixtures.
+
+Next session owning this:
+- Author a dedicated Pattern 6 recogniser ("eu-monthly-state-operator-
+  matrix") that explicitly accepts Italy / Spain / Portugal / France /
+  Denmark / Sweden monthly state tables, leaving Pattern 4 untouched.
+- Fixture test against 3 Italy AGIMEG report samples.
+- Reprocess full corpus only after two-fixture parity pass.
+
+Expected unlock: ~15-20 Italian operator rows for Lottomatica
+(iGaming / sports betting), Sisal (ditto), Snaitech (ditto), + 5-10
+other EU operators in similar market shapes.
