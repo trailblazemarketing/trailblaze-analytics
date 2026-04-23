@@ -648,13 +648,32 @@ export default async function CompanyDetailPage({
       ],
     );
     peersMetric = candidate[0]?.code ?? "online_ggr";
-    const peersRaw = await getEntityLeaderboard({
+    const peersRawAll = await getEntityLeaderboard({
       metricCode: peersMetric,
       marketSlug: primaryMarket.slug,
       entityTypeCode: "operator",
       periodCode,
       limit: 10,
     });
+    // Exclude self-compare: the company whose page this is should never
+    // appear as its own peer (Flutter's page was surfacing Flutter
+    // Entertainment AND FanDuel — two rows for the same dollars, since
+    // fanduel.parent_entity_id → flutter means Flutter's group revenue
+    // already folds in FanDuel's US numbers). Also hide the company's
+    // children (operational sub-brands), its parent (a rollup of which
+    // the current page is a subset), and the company's siblings (they
+    // share a parent whose revenue double-counts too).
+    const relatedIds = await query<{ id: string }>(
+      `SELECT id FROM entities WHERE id = $1
+       UNION
+       SELECT id FROM entities WHERE parent_entity_id = $1
+       UNION
+       SELECT parent_entity_id AS id FROM entities
+         WHERE id = $1 AND parent_entity_id IS NOT NULL`,
+      [company.id],
+    );
+    const excludeIds = new Set(relatedIds.map((r) => r.id));
+    const peersRaw = peersRawAll.filter((r) => !excludeIds.has(r.entity_id));
     peersLb = adaptEntityLeaderboardRows(peersRaw);
 
     // Scale-sanity check: compare the leaderboard's summed EUR total
