@@ -221,9 +221,22 @@ export default async function CompanyDetailPage({
   for (const { pt, label, n } of TM_CADENCE_PREF) {
     const cohort = entityPeriodRows.filter((p) => p.period_type === pt);
     if (cohort.length >= 3) {
-      recentPeriods = cohort
-        .slice(0, n)
-        .sort((a, b) => a.start_date.localeCompare(b.start_date));
+      // Dedup by start_date — periods table carries multiple aliased
+      // codes per calendar month (Jan-26 + M2026-01 both 2026-01-01)
+      // which would otherwise render the same column twice in the
+      // breakdown matrix. Keep the lexicographically first code per
+      // start_date.
+      const byStart = new Map<string, (typeof cohort)[number]>();
+      for (const p of cohort) {
+        const existing = byStart.get(p.start_date);
+        if (!existing || p.code.localeCompare(existing.code) < 0) {
+          byStart.set(p.start_date, p);
+        }
+      }
+      recentPeriods = [...byStart.values()]
+        .sort((a, b) => b.start_date.localeCompare(a.start_date)) // DESC
+        .slice(0, n) // newest n
+        .sort((a, b) => a.start_date.localeCompare(b.start_date)); // ASC for render
       tmCadenceLabel = label;
       break;
     }
@@ -879,7 +892,12 @@ export default async function CompanyDetailPage({
                 {revChartLabel}{revChartCode !== "revenue" ? " (revenue proxy)" : ""} — {cadenceLabel}
               </h3>
               <p className="mt-0.5 text-[10px] text-tb-muted">
-                Last 12 periods · solid = disclosed · dotted = Beacon™
+                {(() => {
+                  const dataPts = chartData.filter(
+                    (d) => d[revChartLabel] != null,
+                  ).length;
+                  return `Last ${dataPts} ${dataPts === 1 ? "period" : "periods"} · solid = disclosed · dotted = Beacon™`;
+                })()}
               </p>
             </div>
             <span className="font-mono text-[10px] text-tb-muted">EUR</span>
@@ -916,7 +934,7 @@ export default async function CompanyDetailPage({
             {cadenceLabel} breakdown
           </h3>
           <p className="mt-0.5 text-[10px] text-tb-muted">
-            Last 6 reported periods · revenue, YoY/QoQ, EBITDA margin, actives
+            {`Last ${quarterlyRows.length} reported ${quarterlyRows.length === 1 ? "period" : "periods"} · revenue, YoY/QoQ, EBITDA margin, actives`}
           </p>
         </div>
         <Table>
