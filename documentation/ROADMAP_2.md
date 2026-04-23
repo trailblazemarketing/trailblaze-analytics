@@ -1,6 +1,6 @@
 # Trailblaze Analytics — Product Roadmap
 
-**Last updated:** 2026-04-22
+**Last updated:** 2026-04-23
 **Owner:** Andrew, Trailblaze Marketing
 **Coordinator:** Claude Opus 4.7 (this doc)
 
@@ -14,11 +14,12 @@ This roadmap supersedes the ad-hoc "what should we build next" decisions that ha
 
 ---
 
-## Where we are (end of day 2)
+## Where we are (morning of day 3)
 
 **Data layer:**
-- 307 Trailblaze PDFs parsed, ~7,000 metric_values
-- 27 Oyvind analyst emails ingested (Gmail pipeline live)
+- 480 reports across 7 document types (209 company_report, 210 market_update, 25 analyst_call, 18 trading_update, 10 shell, 4 capital_markets_day, 4 ma_announcement)
+- 24,747 `metric_values` rows
+- 173 Oyvind analyst emails successfully ingested + reprocessed (Gmail pipeline live and idempotent); 48 own-replies correctly filtered; 2 errored on max_tokens truncation
 - NJ DGE regulator data live — 118 rows including operator-level
 - 321 stock rows across 22 tickers (yfinance)
 - 224,718 FX rates (ECB historical, 1999–2026)
@@ -28,12 +29,21 @@ This roadmap supersedes the ad-hoc "what should we build next" decisions that ha
 - Country/state hierarchy with US rollup
 - Operator heatmap, leaderboards, scorecards, time matrices
 - PDF viewer overlay, report metadata API
+- Market scorecard label collision fixed (commit `76b43b4`): `sportsbook_handle` (391 rows, country-covered) now in primary slot; `handle` (8 rows, state-only) moved to secondary under correct label
 
-**Known gaps entering the roadmap:**
-- 275 `auto_added_needs_review` PDF entities + 19 from NJ regulator — need human canonicalization
+**Known gaps entering the next phase:**
+- **506 `auto_added_needs_review` entities** (up from 294 at end-of-day-2 due to heavy day-2 ingestion) — need human canonicalisation
 - 4/5 original US regulators flagged `broken_needs_research` (PA, MI, CT, IL)
 - 0 Beacon™ estimates exist yet — visual treatment wired, engine not built
 - No forecasting, no news, no AI commentary yet
+- 2 densest US-update reports errored on `max_tokens=32768` truncation — natural Phase 2.5 fixture candidates
+- 10 `shell` document_type reports present — provenance unclear, to investigate
+
+**Country-level rollup TODO (deferred from session 3):**
+- `online_ggr`, `online_ngr`, `handle` show "No data" at country level on Market detail scorecards
+- Data exists at state level only, no rollup materialisation exists
+- Previous session identified `getCountryRollupValues` helper from earlier work that could be extended
+- Needs a design session — approach A (augment with child rollup) vs. extending existing helper
 
 ---
 
@@ -41,20 +51,22 @@ This roadmap supersedes the ad-hoc "what should we build next" decisions that ha
 
 **Goal:** confirm what's already built actually works before adding anything new.
 
-**1.1 Verify Gmail ingestion landed cleanly**
-- SQL check: 27 messages processed, no errors, metric_values attributed to `analyst_note` source
-- Spot-check 3-5 emails in the UI — do they appear on Company/Market detail pages?
-- Does FDJ United Q1-26 data render correctly post-ingest?
-- Single chat session with coordinator, SQL-driven.
+**1.1 Verify Gmail ingestion landed cleanly** ✅ CLOSED 2026-04-23
+- SQL checks: 173 messages ingested, 48 rejected_sender (own-replies), 2 error (max_tokens truncation on densest US-update reports) — verified
+- Date verification: all 15 oldest Gmail-ingested reports now show `published_timestamp::date = received_at::date`. Yesterday they all showed the opposite. Reprocess fixed a 10-month-wide timestamp error across ~170 reports.
+- UI verification: "ANALYST NOTE" header chrome removed from synthetic PDF viewer
+- Reprocess command used: `trailblaze-scrape-gmail --reprocess-existing -v` (runs ~8 hours overnight for 175 messages)
+- Commits landed: `76b43b4` (market scorecard label fix), `728f414` (Phase 2.5 design v1), [hash] (Phase 2.5 design v2)
 
-**1.2 Entity canonicalization — human in the loop**
-- Walk through the 294 `auto_added_needs_review` entities
+**1.2 Entity canonicalization — human in the loop** ← NEXT
+- Walk through the **506** `auto_added_needs_review` entities (more than originally estimated)
 - Merge duplicates (`Betparx` / `betParx`), attach subsidiaries (`MGM Digital` → `MGM Resorts`), resolve aliases
 - Human judgment work — done with coordinator in chat, not by Claude Code
-- 1-2 chat sessions, produces `entity_canonicalization_log.md` for audit
+- Multiple chat sessions given the scale; produces `entity_canonicalization_log.md` for audit
+- Workflow to design at session start: SQL query surfacing entities with similarity clusters + batched review UI or CSV export
 
 **1.3 UI regression check**
-- Screenshot every major page post polish-pass-3
+- Screenshot every major page post-canonicalisation
 - Compare against Gemini mockups + prior working state
 - Catch any regressions before building more on top
 
@@ -97,7 +109,7 @@ This roadmap supersedes the ad-hoc "what should we build next" decisions that ha
 **2.5 Wikipedia entity enrichment**
 - For every entity in DB, pull Wikipedia article (via MediaWiki API, official)
 - Extract: founding date, HQ, parent company, subsidiaries, founder names
-- Store in `entities.extra_metadata` with `source='wikipedia_cc_by_sa'`
+- Store in `entities.metadata` with `source='wikipedia_cc_by_sa'`
 - License: CC-BY-SA, requires attribution shown in UI
 - 1 T3 session
 
@@ -107,21 +119,64 @@ This roadmap supersedes the ad-hoc "what should we build next" decisions that ha
 - Adds data that's referenced in UI_SPEC_2 Operator Panel
 - 1 T3 session
 
-**2.7 Parser Category B — narrative extraction**
+**2.7 Parser Category B — narrative extraction (Phase 2 version)**
 - Marketing % of revenue, regulated market %, sports margin commentary
-- Entity metadata extraction into `entities.extra_metadata` (client count, licensee count, top clients, retail network size)
+- Entity metadata extraction into `entities.metadata` (client count, licensee count, top clients, retail network size)
 - B2B-specific metrics (platform_turnover, take_rate_pct, licensee_count, game_library_size)
 - FTD/NDC extraction insistence
-- Reparse all 307 PDFs once
+- Reparse all ~480 PDFs once
+- Note: this is NARRATIVE extraction. Tabular rich extraction is Phase 2.5.
 - Single T1 session, now better-informed than day 1
 
 **Exit gate:** per-operator data live for 9+ markets (5 US + 4 European minimum); SEC filings + company IR queued; Wikipedia metadata populated; narrative ratios rendering on Company detail pages; stock data expanded.
 
 ---
 
+## Phase 2.5 — Rich tabular extraction ← NEW 2026-04-23
+
+**Goal:** extract the rich tabular data in Oyvind's analyst emails that the current parser collapses. Current parser captures ~5–10 metrics per note from prose; dense tables contain 40–120 metrics per note we're currently losing.
+
+**Design doc:** `documentation/PHASE_2_5_DESIGN_v2.md` (authoritative, approved by Andrew 2026-04-22)
+**Pattern capture:** `documentation/RICH_EXTRACTION_NOTES.md` (raw examples of the 5 patterns)
+
+**Prerequisites:**
+- Phase 1.1 closed (✅ 2026-04-23)
+- Phase 1.2 complete (entity canonicalisation — prevents orphan entity_id writes during rich extraction)
+
+**Structure:** 4 shippable units, each independently demoable.
+
+**Unit A — Operator completeness** (~4 days)
+- Pattern 4 (state × operator matrix) + Pattern 1 (operator segment + regional + product splits)
+- Bundled per Andrew sign-off: operators need both cross-operator rankings AND intra-operator splits simultaneously to feel complete
+- Fixes max_tokens ceiling (unblocks the 2 errored US-update reports)
+- Ship gate: `/markets/massachusetts` Leaderboard shows operator handle+GGR rankings; `/companies/betsson` shows casino/sportsbook/other + B2B/B2C + regional splits
+
+**Unit B — State × month time-series depth** (~2 days)
+- Pattern 5 (17 states × 6 months wide-table extraction)
+- Ship gate: TimeMatrix primitive populated with US Online Sports handle grid
+
+**Unit C — Affiliate completeness** (~3 days)
+- Pattern 3 (affiliate revenue-model + vertical + business-line splits)
+- NEW top-nav entry: `/affiliates` (Andrew sign-off: "add it, delete later if it doesn't work")
+- Ship gate: Raketech renders with revenue composition, vertical, business-line splits, NDCs lead indicator
+
+**Unit D — B2B completeness** (~1.5 days)
+- Pattern 2 (B2B supplier proprietary KPIs: turnover_index, operator_margin, adj_ebitda/adj_ebita distinction)
+- Ship gate: Kambi renders with turnover_index as primary tile
+
+**Parser architecture:** modular pattern recognisers (named blocks in the extraction prompt that are independently testable, versionable, disable-able). Not a monolithic prompt.
+
+**Total Phase 2.5 budget:** 13–14 working days including prep (schema migration, prompt restructure), all 4 units, and a weekend-scale re-extraction run over all ~480 reports.
+
+**Exit gate:** all 5 rich patterns extracted cleanly across the corpus; corresponding UI surfaces populated (state-operator Leaderboards, state-month TimeMatrix, operator segment panels, affiliate panel + nav, B2B primary layout); 2 previously-errored US-update reports now parse cleanly under raised max_tokens.
+
+---
+
 ## Phase 3 — Beacon™ + Forecasting (parallel)
 
 **Goal:** the proprietary analytical layer — both historical estimates (Beacon™) and forward projections (forecast).
+
+**Depends on Phase 2.5** for segment + regional data density. Running Beacon™ modelling on sparse metric coverage produces weak estimates.
 
 **3.1 Methodology page content**
 - Legal-defensible writing explaining Beacon™ methodologies
@@ -162,7 +217,14 @@ This roadmap supersedes the ad-hoc "what should we build next" decisions that ha
 - Methodology link visible
 - 1 T2 session
 
-**Exit gate:** Beacon™ coverage non-zero for 5+ markets; forecast widget live on Company + Market detail; methodology page drafted and linked; dashboard visually complete (no more misleading 0% Beacon™ labels).
+**3.7 Composite score / index** (Christian's suggestion)
+- Proprietary score combining multiple normalised KPIs into a single ranking metric per entity / market
+- Deliberately sequenced AFTER Phase 2.5 so the underlying dataset is dense enough to justify the composite
+- Benchmarking across operators, markets, affiliates, traffic sources
+- Scope TBD based on pilot client feedback
+- 1-2 sessions
+
+**Exit gate:** Beacon™ coverage non-zero for 5+ markets; forecast widget live on Company + Market detail; methodology page drafted and linked; composite index live on Overview + Market + Company detail; dashboard visually complete (no more misleading 0% Beacon™ labels).
 
 ---
 
@@ -245,7 +307,7 @@ This roadmap supersedes the ad-hoc "what should we build next" decisions that ha
 **6.1 Windows Task Scheduler (dev) / Railway cron (prod) setup**
 - Hourly `trailblaze-scrape-gmail`
 - Daily PDF ingest from `reporting.trailblaze-marketing.com`
-- Weekly `trailblaze-scrape-stocks`
+- Weekly `trailblaze-scrape-stocks` (fixes the current thin 30-day sparkline issue on Flutter page)
 - Monthly regulator scrape (2nd of month)
 - Daily RSS pull
 - 1 session
@@ -307,12 +369,13 @@ Features that emerge from real client demand, not speculation:
 - **Advanced news** — paid feeds like Factiva IF client budgets justify
 - **Mobile-friendly views** — if demand materializes
 - **Additional regulators** — as market demand dictates (Brazil ANP, Germany GGL, Ontario iGO, etc.)
+- **Additional rich-extraction patterns** — operator × product matrices, company-level geographic revenue, peer comparison tables, guidance-range extraction, tax/take-rate matrices (listed in `RICH_EXTRACTION_NOTES.md` as Phase 2.6+ candidates)
 
 ---
 
 ## Deliberately excluded — and why
 
-**Nothing from the data-ingestion-and-scraper-work-notes document is excluded.** The four items previously flagged as "out of scope" are now in the roadmap:
+**Nothing from the data-ingestion-and-scraper-work-notes document is excluded.** The four items previously flagged as "out of scope" are in the roadmap:
 
 1. **External source scraping** — Phase 2 covers SEC EDGAR, company IR pages, Wikipedia, free stock APIs, and expanded regulators. Legal, structured sources only; no Google/Bloomberg scraping which would violate ToS.
 
@@ -322,12 +385,15 @@ Features that emerge from real client demand, not speculation:
 
 4. **AI analyst commentary** — Phase 5, grounded in product data, versioned, disclaimed, audit-trailed.
 
+**Additional rich tabular extraction (Phase 2.5)** was initially informal capture in `RICH_EXTRACTION_NOTES.md` during day-2 ingestion. Now fully scoped in `PHASE_2_5_DESIGN_v2.md` and inserted as its own phase.
+
 ---
 
 ## Timeline (realistic, 1-2 sessions/day)
 
-- **Phase 1:** 3-4 days
+- **Phase 1:** 3-4 days (1.1 closed 2026-04-23; 1.2 next, scale up from ~294 to 506 entities extends this)
 - **Phase 2:** 1.5-2 weeks
+- **Phase 2.5:** 13–14 working days
 - **Phase 3:** 2 weeks
 - **Phase 4:** 1 week
 - **Phase 5:** 3-5 days
@@ -335,7 +401,7 @@ Features that emerge from real client demand, not speculation:
 - **Phase 7:** 1-2 weeks
 - **Phase 8+:** ongoing
 
-**Total to pilot-ready:** ~7-9 weeks.
+**Total to pilot-ready:** ~9–11 weeks (extended from original 7–9 estimate, primarily due to Phase 2.5 insertion and larger Phase 1.2 entity pool).
 
 Compressible if working full-time. Extendable if interruptions hit. Adjust expectations accordingly.
 
@@ -349,12 +415,15 @@ Compressible if working full-time. Extendable if interruptions hit. Adjust expec
 4. **Screenshot verification every major UI change.** Eyes on the product.
 5. **When a brief scope expands mid-session, stop and scope the new work separately.** Don't let sessions balloon.
 6. **User (Andrew) = strategist.** Coordinator (Claude Opus) = project manager. Claude Code = engineer. Respect the division.
+7. **NEW:** Parser or extraction logic changes never happen while an ingest or reprocess is running. Use `RICH_EXTRACTION_NOTES.md`-pattern capture files to park observations until the pipeline is quiet.
+8. **NEW:** Handoff documents between chat sessions are the durable record of where we are. They can contain errors inherited from prior handoffs — verify claims against live DB before acting on them.
 
 ---
 
 ## Change log
 
 - **2026-04-22** — Initial roadmap created. Supersedes ad-hoc decisions from days 1-2.
+- **2026-04-23** — Phase 1.1 closed: reprocess successfully applied 383b283 bug fixes to 173/175 Gmail-ingested reports. Phase 2.5 added as new phase between Phase 2 and Phase 3, scoped in `PHASE_2_5_DESIGN_v2.md`. Phase 3 gains composite index (3.7) per Christian's suggestion. Phase 1.2 entity count updated from 294 to 506 (heavy day-2 ingestion). Working rules 7 and 8 added capturing lessons from session 3.
 
 ---
 
