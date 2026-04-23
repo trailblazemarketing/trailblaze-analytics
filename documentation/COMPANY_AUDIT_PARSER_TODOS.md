@@ -673,3 +673,134 @@ fixes for the rest of the report shipped as Fix Classes A-R in commits
 - Priority: investigate-only (don't fix UI until methodology lands)
 - Related Phase 2.5 Unit: D (Beacon engine)
 
+
+---
+
+# QA Round 4 follow-up additions (2026-04-23, post-Unit-A reprocess)
+
+## Issue: Flutter Q3-25 revenue €128.6M with -93.7% QoQ (4-round persistent)
+- What's wrong: Flutter's `revenue` metric has multiple conflicting rows
+  for the same (entity, period) partition. FY-25 has three
+  "disclosed" values in the canonical view: 864 / 9416 / 2746 (all
+  USD millions). Single-quarter picks collapse to the smallest,
+  producing the -93.7% QoQ artefact.
+- Evidence:
+  ```sql
+  SELECT p.code, p.period_type, mv.value_numeric, mv.unit_multiplier
+  FROM metric_values mv JOIN metrics m ON m.id=mv.metric_id
+  JOIN periods p ON p.id=mv.period_id
+  WHERE mv.entity_id=(SELECT id FROM entities WHERE slug='flutter')
+    AND mv.market_id IS NULL AND m.code='revenue'
+    AND mv.disclosure_status='disclosed'
+    AND p.period_type IN ('quarter','full_year','half_year')
+  ORDER BY p.start_date DESC;
+  ```
+- Root cause hypothesis: parser emits segment revenues (FanDuel US,
+  International, Sportsbet, group total) all as `revenue` metric_code
+  against the parent entity. Should be distinct codes or sub-dim rows.
+- Suggested fix: Pattern 1 extraction hardening — when the prompt sees
+  multiple "Revenue" labels on a single operator table, each tagged with
+  a segment (US / International / Group), emit distinct codes. Or
+  extend the metric_value_canonical precedence to prefer group-rollup
+  rows over segment rows.
+- Priority: HIGH (sets Flutter Company detail at €128M instead of ~€10B).
+- Related Unit: parser Unit A hardening / Phase 1.2.5 Workstream C++
+
+## Issue: NGR > Revenue on BetMGM and Betsson
+- What's wrong: BetMGM shows NGR €2.43B vs Revenue €605M; Betsson NGR
+  €1.19B vs Revenue €285M. NGR is definitionally <= Revenue (NGR =
+  Revenue - bonuses), so NGR > Revenue is impossible. Unit error at
+  extraction.
+- Root cause hypothesis: US-reported NGR stored with one multiplier
+  convention, GAAP Revenue stored with another, or the NGR row captured
+  a "lifetime" / "cumulative" figure instead of a period figure.
+- Suggested fix: add a parser-side sanity check — when emitting `ngr`
+  and `revenue` for the same (entity, period), assert ngr <= revenue;
+  if not, hold one row for review.
+- Priority: HIGH (misleads valuation widgets).
+
+## Issue: Italy `/markets/italy` renders `€5.30B™` (™ glued to number)
+- What's wrong: the Italy market scorecard's total value shows as
+  `€5.30B™` — the ™ badge (which should be a superscript Beacon™
+  indicator) is rendering inline as part of the number string.
+- Root cause hypothesis: Either the parser emitted a literal `™`
+  character inside `value_text`, or a UI formatter is concatenating the
+  badge instead of wrapping it in `<sup>`.
+- Suggested fix: grep for value_text rows containing "™"; if present,
+  scrub at parser. If absent, the UI code-path is the culprit — find
+  where the badge is applied to hero scorecard values vs leaderboard
+  rows, likely in a template branch that missed the `<sup>` wrap.
+- Priority: MEDIUM (cosmetic).
+
+## Issue: Betsson Sweden competitive widget €1.6M scale — actually correct
+- Follow-up verification: Betsson Nov-25 Sweden online_ggr = 17.5 with
+  `unit_multiplier='millions'` + `currency='SEK'`. 17.5M SEK / ~11.4
+  SEK-per-EUR = €1.54M, matching UI. The widget's apparent "20×
+  undersized" is the user's expectation of scale, not a bug.
+- Actual issue: ATG Sweden's primary type is `lottery`, LeoVegas /
+  ComeOn / Svenska Spel Sport & Casino have NO entity_type. The
+  Competitive Position widget filters `entityTypeCode='operator'` and
+  excludes all four — giving a widget that misses the Swedish market
+  leaders.
+- Suggested fix: Phase 1.2 entity-type backfill — ATG gets both
+  `lottery` and `operator` tags (it runs both businesses); LeoVegas /
+  ComeOn / Svenska Spel classified as operators.
+- Priority: HIGH (competitive widget misses #1-#3 Swedish operators).
+
+## Issue: BetMGM "Market Share (GGR) (last 6 quarters)" shows bare "22" and "15"
+- What's wrong: the 6-quarter sparkline-ish table shows numeric values
+  without units or % signs. The metric is `market_share_ggr` (unit =
+  percentage), so the raw `22` should render as `22.0%`.
+- Root cause: either the parser stored the value with wrong `unit_type`
+  on the metric def, or the UI is using a formatter that skips the %
+  suffix for this specific widget.
+- Suggested fix: check `metrics.unit_type` for `market_share_ggr` — if
+  it's `ratio` or `count` instead of `percentage`, the formatter won't
+  append %. If the metric def is correct, UI widget needs the
+  percentage-aware formatter.
+- Priority: MEDIUM.
+
+## Issue: Kambi EV/EBITDA 173.1× and P/E 50.9×
+- What's wrong: implausibly high multiples. Kambi post-Unibet-spinoff
+  trades at maybe 5–10× EV/EBITDA.
+- Root cause hypothesis: possibly a unit error in the stock_api scraper
+  (Kambi EBITDA stored in thousands while EV stored in millions), or
+  EBITDA nearly zero making the ratio explode.
+- Suggested fix: scraper-side sanity guard — if EV/EBITDA computes
+  > 100× or < 0, suppress as `derived_unreliable` rather than emitting.
+- Priority: LOW (two entities affected).
+
+## Issue: UK operator leaderboard duplicates (Gamesys vs evoke, Bally's Interactive vs Bally's Corporation)
+- Fix class H from round 4 brief.
+- What's wrong: UK market shows Gamesys (€639.0M), Bally's Interactive
+  (€162.5M), Bally's Corporation (€162.7M) all separately. Gamesys is
+  a subsidiary of evoke plc; the two Bally's rows look like the same
+  entity counted twice.
+- Evidence: `entities` table has both rows with `parent_entity_id =
+  NULL` — no hierarchy link exists to collapse them in the UI layer.
+- Suggested fix: Phase 1.2 entity canonicalisation — set
+  `gamesys.parent_entity_id → evoke`, reconcile the two Bally's rows
+  (merge or parent-link).
+- Priority: MEDIUM (affects UK operator tables, not a blocker).
+
+## Issue: Italy operator coverage — Sisal, Lottomatica, Snaitech, Bet365 Italy not extracted
+- Fix class I from round 4 brief.
+- What's wrong: `/markets/italy` operator leaderboard shows 3 operators
+  (Flutter 83.2%, evoke 15.9%, FairPlay 0.9%) summing to €710M against
+  an actual market of €1.45B. ~50% coverage gap. The Italian market
+  leaders (Sisal, Lottomatica operating brand, Snaitech, Bet365 Italy)
+  have no metric_values rows at the entity × Italy level.
+- Evidence: querying entities with Italy rows returns ~12 names but
+  only 5 have any revenue/GGR metric_values.
+- Suggested fix: Pattern 4 extraction needs an Italian-market template
+  pass — operator × Italy × (month|quarter) cells for Sisal,
+  Lottomatica, Snaitech. Likely surfaced in Oyvind's digest emails
+  covering Italy market updates.
+- Priority: MEDIUM.
+
+## Issue: Overview hero band not built (product request)
+- Round 4 observation, not a bug. Logged for product decision.
+
+## Issue: /markets Beacon™ coverage still 0% on most rows
+- Expected — Beacon methodology is Phase 4.2, not yet implemented.
+- No-op until then.
