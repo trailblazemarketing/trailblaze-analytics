@@ -198,9 +198,13 @@ export default async function CompanyDetailPage({
   const tiles = buildPanelTiles(kind, byCodeAug, beacon);
 
   // CD5: Revenue chart — quarterly, last 12 periods, solid blue for
-  // disclosed + dotted amber for Beacon™. Prefer quarter-bucket periods.
+  // disclosed + dotted amber for Beacon™. Chart + "Quarterly breakdown"
+  // table both filter to period_type='quarter' so half_year / nine_months
+  // / full_year / ltm rows don't create a sawtooth (annual values tower
+  // over quarterly on the same axis).
   const revRows = byCodeAug.get("revenue") ?? [];
-  const sortedRev = [...revRows].sort((a, b) =>
+  const quarterlyRevRows = revRows.filter((r) => r.period_type === "quarter");
+  const sortedRev = [...quarterlyRevRows].sort((a, b) =>
     a.period_start.localeCompare(b.period_start),
   );
   const chartRows = sortedRev.slice(-12);
@@ -226,7 +230,7 @@ export default async function CompanyDetailPage({
 
   // CD6: Quarterly breakdown table — assembles columns from scorecard byCode
   // Period · Revenue · YoY · QoQ · EBITDA Margin · Active Users · Source · Confidence
-  const qPeriods = sortedRev.slice(-6); // six most recent
+  const qPeriods = sortedRev.slice(-6); // six most recent (already quarter-only via sortedRev)
   const quarterlyRows = qPeriods.map((pRow, idx) => {
     const prevYear = sortedRev.find((r) => {
       const d = new Date(r.period_start).getTime();
