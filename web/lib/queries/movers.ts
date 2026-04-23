@@ -164,6 +164,11 @@ export async function getMarginExpansionLeaders(limit = 6): Promise<MoverRow[]> 
 // Strategy sections, truncated to 1 line per row. Entity-scoped preferred;
 // otherwise fall back to any narrative.
 export async function getRecentCommentary(limit = 5) {
+  // Dedup the same narrative content appearing across multiple
+  // source reports — same problem as recentCommentaryCards in
+  // queries/overview. md5 hash of the leading 200 chars (whitespace-
+  // collapsed) partitions duplicates; the most-recent published
+  // timestamp wins per (entity_or_self, body_hash) bucket.
   return await query<{
     narrative_id: string;
     section_code: string;
@@ -173,14 +178,31 @@ export async function getRecentCommentary(limit = 5) {
     report_id: string;
     published_timestamp: string | null;
   }>(
-    `SELECT n.id AS narrative_id, n.section_code, n.content,
+    `WITH ranked AS (
+       SELECT n.id, n.section_code, n.content, n.entity_id, n.report_id,
+              r.published_timestamp,
+              ROW_NUMBER() OVER (
+                PARTITION BY
+                  COALESCE(n.entity_id, n.id),
+                  md5(
+                    regexp_replace(
+                      trim(substring(n.content from 1 for 200)),
+                      '\\s+', ' ', 'g'
+                    )
+                  )
+                ORDER BY r.published_timestamp DESC NULLS LAST, n.id
+              ) AS dup_rn
+       FROM narratives n
+       JOIN reports r ON r.id = n.report_id
+       WHERE n.section_code IN ('investment_view','forecast_strategy')
+     )
+     SELECT ranked.id AS narrative_id, ranked.section_code, ranked.content,
             e.name AS entity_name, e.slug AS entity_slug,
-            n.report_id, r.published_timestamp
-     FROM narratives n
-     JOIN reports r ON r.id = n.report_id
-     LEFT JOIN entities e ON e.id = n.entity_id
-     WHERE n.section_code IN ('investment_view','forecast_strategy')
-     ORDER BY r.published_timestamp DESC NULLS LAST
+            ranked.report_id, ranked.published_timestamp
+     FROM ranked
+     LEFT JOIN entities e ON e.id = ranked.entity_id
+     WHERE ranked.dup_rn = 1
+     ORDER BY ranked.published_timestamp DESC NULLS LAST
      LIMIT $1`,
     [limit],
   );

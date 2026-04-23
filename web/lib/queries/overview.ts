@@ -402,20 +402,56 @@ export interface CommentaryCard {
 }
 
 export async function recentCommentaryCards(limit = 3): Promise<CommentaryCard[]> {
+  // Dedup the same narrative content appearing across multiple
+  // source reports — the QA report saw the Entain Apr-16 excerpt
+  // rendered twice on Overview / Operators because two reports
+  // captured the same paragraph. DISTINCT ON (entity_id, body_hash)
+  // collapses them to one row, keeping the most-recent published_at
+  // as the surviving anchor.
+  //
+  // The body_hash is md5 of the first 200 chars (trimmed + collapsed
+  // whitespace) — long enough to distinguish substantive variants,
+  // short enough that two reports quoting the same lead paragraph
+  // collapse to one row even when the trailing text differs.
   return await query<CommentaryCard>(
-    `SELECT n.id, n.report_id AS "reportId",
+    `WITH ranked AS (
+       SELECT n.id, n.report_id, n.entity_id, n.market_id, n.content,
+              r.published_timestamp,
+              md5(
+                regexp_replace(
+                  trim(substring(n.content from 1 for 200)),
+                  '\\s+', ' ', 'g'
+                )
+              ) AS body_hash,
+              ROW_NUMBER() OVER (
+                PARTITION BY
+                  COALESCE(n.entity_id, n.market_id, n.id),
+                  md5(
+                    regexp_replace(
+                      trim(substring(n.content from 1 for 200)),
+                      '\\s+', ' ', 'g'
+                    )
+                  )
+                ORDER BY r.published_timestamp DESC NULLS LAST, n.id
+              ) AS dup_rn
+       FROM narratives n
+       JOIN reports r ON r.id = n.report_id
+       LEFT JOIN sources s ON s.id = r.source_id
+       WHERE n.content IS NOT NULL AND length(trim(n.content)) > 60
+         AND COALESCE(s.source_type,'') IN (
+           'trailblaze_pdf','analyst_note','industry_trade'
+         )
+     )
+     SELECT ranked.id, ranked.report_id AS "reportId",
             e.name AS "entityName",
             mk.name AS "marketName",
-            r.published_timestamp::text AS "publishedAt",
-            n.content
-     FROM narratives n
-     JOIN reports r ON r.id = n.report_id
-     LEFT JOIN entities e ON e.id = n.entity_id
-     LEFT JOIN markets mk ON mk.id = n.market_id
-     LEFT JOIN sources s ON s.id = r.source_id
-     WHERE n.content IS NOT NULL AND length(trim(n.content)) > 60
-       AND COALESCE(s.source_type,'') IN ('trailblaze_pdf','analyst_note','industry_trade')
-     ORDER BY r.published_timestamp DESC NULLS LAST
+            ranked.published_timestamp::text AS "publishedAt",
+            ranked.content
+     FROM ranked
+     LEFT JOIN entities e ON e.id = ranked.entity_id
+     LEFT JOIN markets mk ON mk.id = ranked.market_id
+     WHERE ranked.dup_rn = 1
+     ORDER BY ranked.published_timestamp DESC NULLS LAST
      LIMIT $1`,
     [limit],
   );
