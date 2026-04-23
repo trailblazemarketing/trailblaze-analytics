@@ -177,10 +177,19 @@ export function buildKpiTile(
 
   // rows come sorted DESC by start_date — newest first
   const latest = rows[0];
-  // Find YoY comparison — same period 12 months back by start_date
+  // Find YoY comparison — same cadence, ~12 months back by start_date.
+  // Restricting to matching period_type is essential: without it, a Q1
+  // pick was being compared to a sibling H1 / 9M / FY row that
+  // happened to share the same start_date (e.g. Betsson Q1-26 vs 9M-25
+  // both start 2025-01-01 → bogus -68% YoY). LTM and derived rows are
+  // also excluded so a synthesised LTM doesn't anchor a real-period
+  // comparison.
   const latestStart = new Date(latest.period_start).getTime();
   const yearMs = 365 * 24 * 60 * 60 * 1000;
   const prev = rows.find((r) => {
+    if (r === latest) return false;
+    if (r.period_type !== latest.period_type) return false;
+    if (r.period_type === "ltm") return false;
     const d = new Date(r.period_start).getTime();
     return Math.abs(d - (latestStart - yearMs)) < 45 * 24 * 60 * 60 * 1000;
   });

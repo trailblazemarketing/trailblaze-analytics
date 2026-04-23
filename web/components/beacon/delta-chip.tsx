@@ -11,14 +11,26 @@ export function DeltaChip({
   size?: "xs" | "sm";
   className?: string;
 }) {
+  const NULL_TOOLTIP =
+    "Insufficient prior-period data to compute YoY (no matching cadence within ±45 days of 12-month lookback, mismatched currency, or value beyond ±80% sanity bound)";
   if (pct == null)
     return (
-      <span className={cn("font-mono text-tb-muted", className)}>—</span>
+      <span
+        className={cn("font-mono text-tb-muted", className)}
+        title={NULL_TOOLTIP}
+      >
+        —
+      </span>
     );
   const n = typeof pct === "string" ? Number(pct) : pct;
   if (!Number.isFinite(n))
     return (
-      <span className={cn("font-mono text-tb-muted", className)}>—</span>
+      <span
+        className={cn("font-mono text-tb-muted", className)}
+        title={NULL_TOOLTIP}
+      >
+        —
+      </span>
     );
   const color =
     Math.abs(n) < 0.05

@@ -173,6 +173,7 @@ export async function getEntityLeaderboard(opts: {
              mvc.value_numeric, mvc.unit_multiplier, mvc.currency,
              mvc.disclosure_status, mvc.source_type,
              p.start_date, p.end_date, p.code AS period_code,
+             p.period_type,
              m.unit_type, m.code AS metric_code,
              fx.eur_rate::text AS eur_rate,
              ROW_NUMBER() OVER (
@@ -245,10 +246,14 @@ export async function getEntityLeaderboard(opts: {
     FROM entities e
     JOIN per_entity latest ON latest.entity_id = e.id ${latestFilter}
     LEFT JOIN per_entity prev ON prev.entity_id = e.id
+      AND prev.period_type = latest.period_type
+      AND prev.period_type <> 'ltm'
       AND prev.start_date <= (latest.start_date - INTERVAL '270 days')::date
       AND prev.start_date >= (latest.start_date - INTERVAL '430 days')::date
-      AND prev.rn = (SELECT MIN(rn) FROM per_entity WHERE entity_id = e.id AND
-                     start_date <= (latest.start_date - INTERVAL '270 days')::date
+      AND prev.rn = (SELECT MIN(rn) FROM per_entity WHERE entity_id = e.id
+                     AND period_type = latest.period_type
+                     AND period_type <> 'ltm'
+                     AND start_date <= (latest.start_date - INTERVAL '270 days')::date
                      AND start_date >= (latest.start_date - INTERVAL '430 days')::date)
     WHERE e.is_active = true
     ORDER BY (latest.value_numeric / NULLIF(latest.eur_rate::numeric, 0) * COALESCE(
@@ -338,6 +343,7 @@ export async function getMarketLeaderboard(opts: {
       SELECT mvc.market_id, mvc.period_id, mvc.value_numeric, mvc.unit_multiplier,
              mvc.currency, mvc.disclosure_status, mvc.source_type,
              p.start_date, p.end_date, p.code AS period_code,
+             p.period_type,
              m.unit_type, m.code AS metric_code,
              fx.eur_rate::text AS eur_rate,
              ROW_NUMBER() OVER (
@@ -408,10 +414,14 @@ export async function getMarketLeaderboard(opts: {
     FROM markets mk
     JOIN per_market latest ON latest.market_id = mk.id ${latestFilter}
     LEFT JOIN per_market prev ON prev.market_id = mk.id
+      AND prev.period_type = latest.period_type
+      AND prev.period_type <> 'ltm'
       AND prev.start_date <= (latest.start_date - INTERVAL '270 days')::date
       AND prev.start_date >= (latest.start_date - INTERVAL '430 days')::date
-      AND prev.rn = (SELECT MIN(rn) FROM per_market WHERE market_id = mk.id AND
-                     start_date <= (latest.start_date - INTERVAL '270 days')::date
+      AND prev.rn = (SELECT MIN(rn) FROM per_market WHERE market_id = mk.id
+                     AND period_type = latest.period_type
+                     AND period_type <> 'ltm'
+                     AND start_date <= (latest.start_date - INTERVAL '270 days')::date
                      AND start_date >= (latest.start_date - INTERVAL '430 days')::date)
     WHERE 1=1 ${typeFilter} ${parentFilter}
     ORDER BY (latest.value_numeric / NULLIF(latest.eur_rate::numeric, 0) * COALESCE(
@@ -664,10 +674,15 @@ export function yoyPctGated(opts: {
 
   const pct = ((cur - prev) / Math.abs(prev)) * 100;
 
-  // Sanity: suppress absurd outliers that nearly always indicate a unit or
-  // segment mismatch. Real YoYs are rarely beyond ±500%.
+  // Sanity: suppress outliers that nearly always indicate a unit /
+  // segment / cadence mismatch rather than a real swing. Real YoYs for
+  // established gambling operators rarely exceed ±80%; newly-regulated
+  // markets (e.g. Brazil) can spike on a real basis but the safer
+  // default is to show em-dash and let the analyst dig in. The
+  // mid-session symptoms — Sweden -89.5%, Brazil -75.2%, Greece -71.3%,
+  // Betsson revenue -68.1% — were all of this class.
   if (!Number.isFinite(pct)) return null;
-  if (Math.abs(pct) > 500) return null;
+  if (Math.abs(pct) > 80) return null;
 
   return pct;
 }
