@@ -167,9 +167,9 @@ export default async function CompaniesIndexPage({
         />
         <KpiAggTile
           small
-          label="Companies reporting this period"
+          label="Companies reporting"
           value={kpis.companies_reporting.toLocaleString()}
-          hint="Entities with metric_values in the latest period"
+          hint="Canonical entities with disclosed values in the last 180 days"
         />
       </div>
 

@@ -230,6 +230,11 @@ export async function getCompaniesAggregateKpis(): Promise<{
     companies_reporting: number;
   }>(
     `WITH latest_rev AS (
+       -- Hero "Total Combined Revenue (LTM)" must align with the table
+       -- TOTAL further down the page. Both use the same canonical
+       -- entity set: is_active = true AND status != auto_added_needs_review.
+       -- Restricted to revenue only (was previously revenue OR ngr,
+       -- which inflated the sum for entities that disclose both).
        SELECT DISTINCT ON (mvc.entity_id) mvc.entity_id,
               mvc.value_numeric, mvc.unit_multiplier, mvc.currency,
               p.end_date,
@@ -244,9 +249,10 @@ export async function getCompaniesAggregateKpis(): Promise<{
            AND f.rate_date <= p.end_date
          ORDER BY f.rate_date DESC LIMIT 1
        ) fx ON true
-       WHERE m.code IN ('revenue','ngr')
+       WHERE m.code = 'revenue'
          AND mvc.entity_id IS NOT NULL AND mvc.market_id IS NULL
          AND e.is_active = true
+         AND COALESCE(e.metadata->>'status','') <> 'auto_added_needs_review'
          AND mvc.value_numeric IS NOT NULL
          AND mvc.disclosure_status = 'disclosed'
          AND p.period_type IN ('quarter','half_year','full_year','ltm')
@@ -262,6 +268,7 @@ export async function getCompaniesAggregateKpis(): Promise<{
        WHERE m.code = 'ebitda_margin'
          AND mvc.entity_id IS NOT NULL AND mvc.market_id IS NULL
          AND e.is_active = true
+         AND COALESCE(e.metadata->>'status','') <> 'auto_added_needs_review'
          AND mvc.value_numeric IS NOT NULL
          AND mvc.disclosure_status = 'disclosed'
        ORDER BY mvc.entity_id, p.start_date DESC
@@ -294,6 +301,7 @@ export async function getCompaniesAggregateKpis(): Promise<{
        WHERE m.code = 'active_customers'
          AND mvc.entity_id IS NOT NULL AND mvc.market_id IS NULL
          AND e.is_active = true
+         AND COALESCE(e.metadata->>'status','') <> 'auto_added_needs_review'
          AND mvc.value_numeric IS NOT NULL
          AND mvc.disclosure_status = 'disclosed'
        ORDER BY mvc.entity_id, p.start_date DESC
@@ -306,6 +314,13 @@ export async function getCompaniesAggregateKpis(): Promise<{
          ORDER BY rev_eur DESC NULLS LAST LIMIT 5
        ) t5
      ),
+     -- "Companies reporting this period" was previously the count of
+     -- entities with a metric_value at the EXACT MAX(start_date) — too
+     -- strict (only 3 entities had reported the absolute latest period
+     -- when ~28 had reported within the last cohort window). Loosen
+     -- to: distinct canonical entities with any disclosed metric_value
+     -- within the last 180 days. Aligned with the table's "active
+     -- companies" set (is_active + non-pending).
      latest_period AS (
        SELECT MAX(p.start_date) AS dt
        FROM periods p
@@ -314,6 +329,17 @@ export async function getCompaniesAggregateKpis(): Promise<{
            SELECT 1 FROM metric_value_canonical mvc
            WHERE mvc.period_id = p.id AND mvc.entity_id IS NOT NULL
          )
+     ),
+     reporting_window AS (
+       SELECT COUNT(DISTINCT mvc.entity_id)::int AS n
+       FROM metric_value_canonical mvc
+       JOIN periods p ON p.id = mvc.period_id
+       JOIN entities e ON e.id = mvc.entity_id
+       WHERE mvc.entity_id IS NOT NULL
+         AND e.is_active = true
+         AND COALESCE(e.metadata->>'status','') <> 'auto_added_needs_review'
+         AND mvc.disclosure_status = 'disclosed'
+         AND p.start_date >= (CURRENT_DATE - INTERVAL '180 days')::date
      )
      SELECT
        (SELECT COUNT(*)::int FROM entities
@@ -333,11 +359,7 @@ export async function getCompaniesAggregateKpis(): Promise<{
           FROM rev_in_eur re JOIN latest_cust lc ON lc.entity_id = re.entity_id) AS blended_arpu_eur,
        (SELECT ((SELECT top5_sum FROM top5) / NULLIF(SUM(rv.rev_eur), 0) * 100)::text
           FROM rev_in_eur rv) AS top5_concentration_pct,
-       (SELECT COUNT(DISTINCT mvc.entity_id)::int
-          FROM metric_value_canonical mvc
-          JOIN periods p ON p.id = mvc.period_id
-          WHERE mvc.entity_id IS NOT NULL
-            AND p.start_date = (SELECT dt FROM latest_period)) AS companies_reporting`,
+       (SELECT n FROM reporting_window) AS companies_reporting`,
   );
   const r = rows[0];
   return {
