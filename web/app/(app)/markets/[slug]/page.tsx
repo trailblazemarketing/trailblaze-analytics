@@ -359,16 +359,22 @@ export default async function MarketDetailPage({
   // "latest by start_date" pick from buildKpiTile mistakes a single
   // quarter for LTM (e.g. UK Q4-25 € 1.71B vs the true LTM ~ € 9B).
   // Prefer an actual LTM-period row; otherwise derive one by summing
-  // the 4 most-recent consecutive quarters; otherwise leave the data
-  // unchanged so the tile shows whatever it can (still labelled LTM —
-  // a future enhancement is to drop the suffix when no LTM is derivable).
+  // the 4 most-recent consecutive quarters. If neither path produces an
+  // LTM value, track the miss so the panel label can be honestly
+  // relabelled below (Sweden has only months + YTD rows on online_ggr,
+  // so the tile would otherwise read "Online GGR (LTM) — 1.58B · Nov
+  // 2025" which is misleading per round-7 truth-check).
   const onlineGgrSeries = byCode.get("online_ggr") ?? [];
+  let onlineGgrIsLtm = false;
   if (onlineGgrSeries.length > 0) {
     const hasNativeLtm = onlineGgrSeries.some((r) => r.period_type === "ltm");
-    if (!hasNativeLtm) {
+    if (hasNativeLtm) {
+      onlineGgrIsLtm = true;
+    } else {
       const derivedLtm = deriveLtmFromTrailingQuarters(onlineGgrSeries);
       if (derivedLtm) {
         byCode.set("online_ggr", [derivedLtm, ...onlineGgrSeries]);
+        onlineGgrIsLtm = true;
       }
     }
   }
@@ -413,6 +419,16 @@ export default async function MarketDetailPage({
   }
 
   const tiles = buildPanelTiles("market", byCode, beacon);
+
+  // Relabel the Online GGR tile if we couldn't resolve or derive LTM.
+  // Fix A's period caption on the tile will still surface the real
+  // period (e.g. "Nov 2025"), but the tile's MAIN label needs to match
+  // what's actually being shown — Sweden + similar markets where the
+  // panel recipe says "(LTM)" but the data is a single month.
+  if (!onlineGgrIsLtm) {
+    const tile = tiles.primary.find((t) => t.code === "online_ggr");
+    if (tile) tile.label = "Online GGR";
+  }
 
   // Build time matrix rows
   const tmRows: TimeMatrixRow[] = [];
