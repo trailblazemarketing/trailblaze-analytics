@@ -448,8 +448,18 @@ export default async function CompanyDetailPage({
           ? "Modeled"
           : "Verified",
       isBeacon,
+      // Used by the table render to drop rows where every value column
+      // came back null/em-dash. A row with only a period label and a
+      // source chip is noise — typically signals the period exists in
+      // the metric_values table but the value_numeric was empty
+      // (parser planted a row for a header it couldn't extract).
+      hasAnyValue:
+        revEur != null ||
+        pRow.value_numeric != null ||
+        margin != null ||
+        actUsers != null,
     };
-  });
+  }).filter((r) => r.hasAnyValue);
 
   // Time matrices (kept from prior version) — geographic breakdown + metrics
   const periodCodes = recentPeriods.map((p) => p.code);
