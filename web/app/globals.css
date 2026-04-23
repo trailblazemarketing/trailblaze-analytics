@@ -44,13 +44,29 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Beacon™ watermark superscript */
+/* Beacon™ watermark superscript.
+ *
+ * `vertical-align: super` works for inline contexts (text flow) but is
+ * a no-op when the <sup> is itself a flex child — which is what the
+ * Scorecard primitive renders ("€5.30B™" displayed inline because the
+ * tile's value+sup pair sits inside `flex items-baseline`). The QA
+ * report flagged this on /markets/italy.
+ *
+ * Combined approach: keep `vertical-align: super` for the inline case
+ * and add `align-self: flex-start` + a negative translateY so the sup
+ * also raises to baseline-superscript when laid out as a flex item.
+ * The translate moves the *box* without affecting text-flow elements
+ * so it's safe in both contexts.
+ */
 .beacon-tm {
   color: var(--tb-beacon);
   font-size: 0.65em;
   font-weight: 600;
   vertical-align: super;
-  margin-left: 1px;
+  align-self: flex-start;
+  display: inline-block;
+  transform: translateY(-15%);
+  margin-left: 2px;
   letter-spacing: 0.02em;
 }
 
