@@ -138,10 +138,19 @@ export function MetricTimeseries({
             ];
           }}
         />
-        <Legend
-          wrapperStyle={{ fontSize: 10, color: "var(--tb-text-muted)" }}
-          iconType="plainline"
-        />
+        {/* Single-series charts don't need a legend (the axis title /
+            panel header already names the series). Showing one is
+            visually noisy and was the source of the QA-reported
+            "duplicate Q1-25 / Q2-25 labels" on Betsson + Kambi —
+            Recharts under certain narrow-width conditions echoed an
+            x-axis tick into the legend slot. Render only when
+            multiple series are present. */}
+        {series.length > 1 && (
+          <Legend
+            wrapperStyle={{ fontSize: 10, color: "var(--tb-text-muted)" }}
+            iconType="plainline"
+          />
+        )}
         {series.map((s, i) => {
           const color = PALETTE[i % PALETTE.length];
           return (
