@@ -40,7 +40,9 @@ import {
   countTrackedMarkets,
   sumLatestPerEntity,
   sumLatestPerMarket,
+  topEntitiesByRevenue,
 } from "@/lib/queries/overview";
+import { CompaniesTreemap } from "@/components/overview/companies-treemap";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -114,6 +116,21 @@ export default async function HomePage({
     sumLatestPerMarket("casino_ggr"),
     sumLatestPerMarket("sportsbook_ggr"),
   ]);
+
+  // Companies treemap data — top 30 canonical entities by revenue.
+  // Skipped if the hero TotalRev tile would have lit up the same set
+  // (always true here; we still query separately to keep the shape
+  // dedicated to the treemap render).
+  const treemapEntities = await topEntitiesByRevenue(30);
+  const treemapData = treemapEntities
+    .filter((e) => e.revenueEur > 0)
+    .map((e) => ({
+      name: e.name,
+      slug: e.slug,
+      size: e.revenueEur,
+      entityType: e.entityType,
+      yoyPct: e.yoyPct,
+    }));
 
   // Compute hero YoYs only when both sides are present and within bounds
   function heroYoy(eur: number, prev: number | null): number | null {
@@ -228,6 +245,34 @@ export default async function HomePage({
             yoyPct={heroYoy(heroSportsbookGgr.eur, heroSportsbookGgr.prevEur)}
           />
         </div>
+
+        {/* Companies treemap — top 30 canonical entities by latest
+            revenue, EUR-converted. Cell size = revenue, colour =
+            entity type (operator=blue, b2b_*=cyan, affiliate=teal,
+            lottery=amber, dfs=purple). Click navigates to the
+            company detail page. */}
+        {treemapData.length > 0 && (
+          <div className="rounded-md border border-tb-border bg-tb-surface">
+            <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+              <div>
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                  Companies — top {treemapData.length} by revenue
+                </h3>
+                <p className="mt-0.5 text-[10px] text-tb-muted">
+                  Cell size = latest revenue · colour = entity type · click to drill in
+                </p>
+              </div>
+              <div className="flex items-center gap-3 font-mono text-[9px] text-tb-muted">
+                <LegendDot color="#00b4d8" label="operator" />
+                <LegendDot color="#4cc9f0" label="b2b" />
+                <LegendDot color="#2ec4b6" label="affiliate" />
+                <LegendDot color="#ffb703" label="lottery" />
+                <LegendDot color="#7209b7" label="dfs" />
+              </div>
+            </div>
+            <CompaniesTreemap data={treemapData} height={450} />
+          </div>
+        )}
 
         {/* Panel A + B: Markets leaderboard (2/3) · Right column stacked (1/3)
             items-start: each panel takes its natural content height. Without
@@ -555,6 +600,18 @@ async function getDataDrops(limit = 6): Promise<DataDropRow[]> {
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
   );
   return drops.slice(0, limit);
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className="inline-block h-2 w-2 rounded-sm"
+        style={{ background: color }}
+      />
+      <span>{label}</span>
+    </span>
+  );
 }
 
 function relativeTime(iso: string): string {
