@@ -37,10 +37,11 @@ import {
   type TimeseriesPoint,
   type BeaconFlags,
 } from "@/components/charts/metric-timeseries";
-import { formatDate, formatMetricValueEur } from "@/lib/format";
+import { formatDate, formatMetricValueEur, truncateAtSentence } from "@/lib/format";
 import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { query } from "@/lib/db";
 import type { MetricValueRow } from "@/lib/types";
+import { FileText } from "lucide-react";
 import {
   nativeToEur,
   toRawNumeric,
@@ -678,7 +679,7 @@ export default async function MarketDetailPage({
                     className="flex items-center justify-between gap-2"
                   >
                     <span className="inline-flex min-w-0 items-center gap-2">
-                      <span className="h-3 w-3 shrink-0 rounded-sm bg-tb-border" />
+                      <FileText className="h-3 w-3 shrink-0 text-tb-muted" aria-hidden />
                       <span className="truncate text-[11px] text-tb-text hover:text-tb-blue">
                         {displayReportFilename(f.filename)}
                       </span>
@@ -768,9 +769,7 @@ export default async function MarketDetailPage({
                       key={n.id}
                       className="border-l-2 border-tb-border pl-3 text-[11px] leading-relaxed text-tb-text"
                     >
-                      {n.content.length > 480
-                        ? n.content.slice(0, 480) + "…"
-                        : n.content}
+                      {truncateAtSentence(n.content, 480)}
                       <div className="mt-1 text-[10px] text-tb-muted">
                         <ReportLink
                           reportId={n.report_id}

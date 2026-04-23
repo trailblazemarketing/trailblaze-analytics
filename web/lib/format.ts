@@ -13,6 +13,33 @@ export function toRaw(value: number, mult: UnitMultiplier): number {
   return value * MULT[mult];
 }
 
+// Truncate a long body of text near `maxLen` chars, but preferring the
+// last full sentence within the limit so excerpts don't trail off
+// mid-word ("...at the time of the CMD i..." → "...at the time of the
+// CMD…"). Falls back to a clean word boundary, then to a hard cut, in
+// that order. Always appends an ellipsis when the original was longer.
+export function truncateAtSentence(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  const head = text.slice(0, maxLen);
+  // Find last sentence-ending punctuation within the head
+  const sentenceEnds = [
+    head.lastIndexOf(". "),
+    head.lastIndexOf("? "),
+    head.lastIndexOf("! "),
+    head.lastIndexOf(".\n"),
+  ];
+  const sentenceCut = Math.max(...sentenceEnds);
+  if (sentenceCut > maxLen * 0.6) {
+    return head.slice(0, sentenceCut + 1) + "…";
+  }
+  // Fall back to last whitespace
+  const wordCut = head.lastIndexOf(" ");
+  if (wordCut > maxLen * 0.6) {
+    return head.slice(0, wordCut) + "…";
+  }
+  return head + "…";
+}
+
 function abbreviate(n: number, currency: string | null): string {
   const sign = n < 0 ? "-" : "";
   const abs = Math.abs(n);

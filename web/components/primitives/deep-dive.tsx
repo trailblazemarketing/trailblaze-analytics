@@ -13,6 +13,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import Link from "next/link";
+import { truncateAtSentence } from "@/lib/format";
 import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -241,9 +242,7 @@ export function DeepDive({
                     )}
                   </div>
                   <p className="whitespace-pre-line text-[11px] leading-relaxed text-tb-text">
-                    {n.content.length > 320
-                      ? n.content.slice(0, 320) + "…"
-                      : n.content}
+                    {truncateAtSentence(n.content, 320)}
                   </p>
                 </div>
               ))}
