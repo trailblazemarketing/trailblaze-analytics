@@ -8,6 +8,7 @@ already exists for the hash, we short-circuit and return the existing id.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,6 +16,21 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+# Trademark / copyright / degree glyphs occasionally bleed into the
+# LLM's `value_text` when the source PDF rendered them next to a number
+# (e.g. Italy "€5.30B™" where ™ belonged to a Beacon badge but was
+# concatenated into the value string). Strip them defensively at ingest
+# so downstream formatters don't have to special-case the same char
+# repeatedly.
+_GLYPH_STRIP_RE = re.compile(r"[™®©°]")
+
+
+def _strip_glyphs(s: str | None) -> str | None:
+    if s is None:
+        return None
+    cleaned = _GLYPH_STRIP_RE.sub("", s).strip()
+    return cleaned if cleaned else None
 
 from trailblaze.db.models import (
     Entity,
@@ -163,7 +179,7 @@ def ingest(
                 report_id=report.id,
                 source_id=pdf_source_id,
                 value_numeric=m.value_numeric,
-                value_text=m.value_text,
+                value_text=_strip_glyphs(m.value_text),
                 currency=m.currency,
                 unit_multiplier=m.unit_multiplier,
                 yoy_change_pct=m.yoy_change_pct,
