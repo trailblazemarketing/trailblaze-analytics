@@ -197,14 +197,25 @@ export default async function CompanyDetailPage({
   const beacon = await getBeaconEstimatesForValues(allBeaconIds);
   const tiles = buildPanelTiles(kind, byCodeAug, beacon);
 
-  // CD5: Revenue chart — quarterly, last 12 periods, solid blue for
-  // disclosed + dotted amber for Beacon™. Chart + "Quarterly breakdown"
-  // table both filter to period_type='quarter' so half_year / nine_months
-  // / full_year / ltm rows don't create a sawtooth (annual values tower
-  // over quarterly on the same axis).
+  // CD5: Revenue chart + "<Cadence> breakdown" table share a single
+  // period-type cohort so half_year / nine_months / full_year / ltm rows
+  // don't create a sawtooth (annual values tower over quarterly on the
+  // same axis). Cadence is resolved hierarchically: quarter → half_year
+  // → full_year, so quarterly reporters (Flutter) keep their quarterly
+  // view while semi-annual reporters (Playtech) still see their data.
   const revRows = byCodeAug.get("revenue") ?? [];
-  const quarterlyRevRows = revRows.filter((r) => r.period_type === "quarter");
-  const sortedRev = [...quarterlyRevRows].sort((a, b) =>
+  const quarterRows = revRows.filter((r) => r.period_type === "quarter");
+  const halfYearRows = revRows.filter((r) => r.period_type === "half_year");
+  const fullYearRows = revRows.filter((r) => r.period_type === "full_year");
+  const { preferredRevRows, cadenceLabel } =
+    quarterRows.length > 0
+      ? { preferredRevRows: quarterRows, cadenceLabel: "Quarterly" }
+      : halfYearRows.length > 0
+      ? { preferredRevRows: halfYearRows, cadenceLabel: "Half-Year" }
+      : fullYearRows.length > 0
+      ? { preferredRevRows: fullYearRows, cadenceLabel: "Annual" }
+      : { preferredRevRows: [] as typeof revRows, cadenceLabel: "Quarterly" };
+  const sortedRev = [...preferredRevRows].sort((a, b) =>
     a.period_start.localeCompare(b.period_start),
   );
   const chartRows = sortedRev.slice(-12);
@@ -228,9 +239,9 @@ export default async function CompanyDetailPage({
     ),
   };
 
-  // CD6: Quarterly breakdown table — assembles columns from scorecard byCode
+  // CD6: Breakdown table (cadence from `cadenceLabel`) — columns from scorecard byCode
   // Period · Revenue · YoY · QoQ · EBITDA Margin · Active Users · Source · Confidence
-  const qPeriods = sortedRev.slice(-6); // six most recent (already quarter-only via sortedRev)
+  const qPeriods = sortedRev.slice(-6); // six most recent (already single-cadence via sortedRev)
   const quarterlyRows = qPeriods.map((pRow, idx) => {
     const prevYear = sortedRev.find((r) => {
       const d = new Date(r.period_start).getTime();
@@ -586,10 +597,10 @@ export default async function CompanyDetailPage({
           <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
             <div>
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-                Revenue — quarterly
+                Revenue — {cadenceLabel}
               </h3>
               <p className="mt-0.5 text-[10px] text-tb-muted">
-                Last 12 quarters · solid = disclosed · dotted = Beacon™
+                Last 12 periods · solid = disclosed · dotted = Beacon™
               </p>
             </div>
             <span className="font-mono text-[10px] text-tb-muted">EUR</span>
@@ -619,11 +630,11 @@ export default async function CompanyDetailPage({
         </div>
       </div>
 
-      {/* CD6: Quarterly breakdown table */}
+      {/* CD6: Breakdown table — cadence chosen by hierarchical fallback */}
       <div className="rounded-md border border-tb-border bg-tb-surface">
         <div className="border-b border-tb-border px-3 py-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-            Quarterly breakdown
+            {cadenceLabel} breakdown
           </h3>
           <p className="mt-0.5 text-[10px] text-tb-muted">
             Last 6 reported periods · revenue, YoY/QoQ, EBITDA margin, actives
