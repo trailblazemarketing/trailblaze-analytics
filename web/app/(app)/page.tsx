@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { ReportLink } from "@/components/reports/report-link";
 import { OperatorsSubTabs } from "./operators-sub-tabs";
 import { formatDate, formatEur } from "@/lib/format";
+import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import type { Report } from "@/lib/types";
 import { getCountryRollupValues } from "@/lib/queries/markets";
 import { MarketBarChart } from "@/components/charts/market-bar";
@@ -293,7 +294,7 @@ function RecentReportsCard({
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-[11px] font-medium text-tb-text">
-                    {r.filename}
+                    {displayReportFilename(r.filename)}
                   </span>
                   <span className="shrink-0 font-mono text-[9px] text-tb-muted">
                     {formatDate(r.published_timestamp)}

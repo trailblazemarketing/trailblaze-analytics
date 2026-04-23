@@ -38,6 +38,7 @@ import {
   type BeaconFlags,
 } from "@/components/charts/metric-timeseries";
 import { formatDate, formatMetricValueEur } from "@/lib/format";
+import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { query } from "@/lib/db";
 import type { MetricValueRow } from "@/lib/types";
 import { nativeToEur, toRawNumeric } from "@/lib/queries/analytics";
@@ -540,7 +541,7 @@ export default async function MarketDetailPage({
                     <span className="inline-flex min-w-0 items-center gap-2">
                       <span className="h-3 w-3 shrink-0 rounded-sm bg-tb-border" />
                       <span className="truncate text-[11px] text-tb-text hover:text-tb-blue">
-                        {f.filename}
+                        {displayReportFilename(f.filename)}
                       </span>
                     </span>
                     <span className="shrink-0 font-mono text-[9px] text-tb-muted">
@@ -636,7 +637,7 @@ export default async function MarketDetailPage({
                           reportId={n.report_id}
                           className="hover:text-tb-blue"
                         >
-                          → {n.report_filename} · {formatDate(n.published_timestamp)}
+                          → {displayReportFilename(n.report_filename)} · {formatDate(n.published_timestamp)}
                         </ReportLink>
                       </div>
                     </div>
@@ -680,7 +681,7 @@ export default async function MarketDetailPage({
                       reportId={r.id}
                       className="text-tb-text hover:text-tb-blue"
                     >
-                      {r.filename}
+                      {displayReportFilename(r.filename)}
                     </ReportLink>
                   </TD>
                   <TD>

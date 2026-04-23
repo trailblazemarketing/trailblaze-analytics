@@ -13,6 +13,7 @@ import { Table, THead, TBody, TH, TD, TR } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ValueCell } from "@/components/beacon/value-cell";
 import { formatDate } from "@/lib/format";
+import { displayReportFilename } from "@/lib/formatters/reportFilename";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +61,7 @@ export default async function ReportDetailPage({
             <Badge variant="muted">{report.document_type}</Badge>
             <ReportStatus status={report.parse_status} />
           </div>
-          <h1 className="truncate text-lg font-semibold">{report.filename}</h1>
+          <h1 className="truncate text-lg font-semibold">{displayReportFilename(report.filename)}</h1>
           <p className="mt-1 text-xs text-tb-muted">
             Published {formatDate(report.published_timestamp)}
             {report.parser_version && (

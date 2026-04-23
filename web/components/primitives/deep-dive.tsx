@@ -13,6 +13,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import Link from "next/link";
+import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { SourceLabel } from "@/components/beacon/source-label";
@@ -348,7 +349,7 @@ export function DeepDive({
                 reportId={r.id}
                 className="truncate rounded border border-tb-border px-2 py-0.5 text-[10px] text-tb-text transition-colors hover:border-tb-blue hover:text-tb-blue"
               >
-                {r.filename}
+                {displayReportFilename(r.filename)}
               </ReportLink>
             ))}
           </div>

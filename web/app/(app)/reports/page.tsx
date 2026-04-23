@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TH, TD, TR } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { formatDate } from "@/lib/format";
+import { displayReportFilename } from "@/lib/formatters/reportFilename";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +123,7 @@ export default async function ReportsIndexPage({
                     reportId={r.id}
                     className="text-tb-text hover:text-tb-blue"
                   >
-                    {r.filename}
+                    {displayReportFilename(r.filename)}
                   </ReportLink>
                 </TD>
                 <TD className="py-1">

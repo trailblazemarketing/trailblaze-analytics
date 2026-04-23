@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ValueCell } from "@/components/beacon/value-cell";
 import { formatDate } from "@/lib/format";
+import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import type {
   MetricValueRow,
   BeaconEstimate,
@@ -88,7 +89,9 @@ export function ReportViewerModal({
           <FileText className="h-4 w-4 shrink-0 text-tb-blue" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">
-              {meta?.report.filename ?? "Loading…"}
+              {meta?.report.filename
+                ? displayReportFilename(meta.report.filename)
+                : "Loading…"}
             </div>
             {meta?.report && (
               <div className="mt-0.5 flex items-center gap-2 text-[10px] text-tb-muted">
@@ -322,7 +325,11 @@ function MetadataPanel({ meta }: { meta: Meta }) {
             className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 text-xs"
           >
             <dl className="space-y-2">
-              <Field label="Filename" value={meta.report.filename} mono />
+              <Field
+                label="Filename"
+                value={displayReportFilename(meta.report.filename)}
+                mono
+              />
               <Field
                 label="Document type"
                 value={meta.report.document_type}

@@ -42,6 +42,7 @@ import { ReportLink } from "@/components/reports/report-link";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TH, TD, TR } from "@/components/ui/table";
 import { formatDate, formatEur, formatNative } from "@/lib/format";
+import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { query } from "@/lib/db";
 import type { MetricValueRow } from "@/lib/types";
 
@@ -758,7 +759,7 @@ export default async function CompanyDetailPage({
                 className="inline-flex items-center gap-1.5 rounded border border-tb-border bg-tb-bg px-2 py-1 font-mono text-[10px] text-tb-text hover:border-tb-blue hover:text-tb-blue"
               >
                 <span className="h-3 w-3 shrink-0 rounded-sm bg-tb-border" />
-                <span className="truncate">{r.filename}</span>
+                <span className="truncate">{displayReportFilename(r.filename)}</span>
                 <span className="text-tb-muted">
                   {formatDate(r.published_timestamp)}
                 </span>
