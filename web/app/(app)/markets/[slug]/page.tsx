@@ -279,6 +279,17 @@ export default async function MarketDetailPage({
     }
   });
   const beacon = await getBeaconEstimatesForValues(allBeaconIds);
+
+  // sportsbook_handle and sportsbook_turnover are semantic synonyms in
+  // iGaming reporting (handle = turnover). When a market has turnover
+  // rows but no handle rows, alias turnover into the handle slot so the
+  // primary KPI tile renders instead of "No data".
+  const handleRows = byCode.get("sportsbook_handle") ?? [];
+  const turnoverRows = byCode.get("sportsbook_turnover") ?? [];
+  if (handleRows.length === 0 && turnoverRows.length > 0) {
+    byCode.set("sportsbook_handle", turnoverRows);
+  }
+
   const tiles = buildPanelTiles("market", byCode, beacon);
 
   // Build time matrix rows
