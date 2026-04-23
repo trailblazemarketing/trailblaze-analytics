@@ -31,9 +31,17 @@ export interface CountryDatum {
 // Three-stop interpolation with a higher floor (t≥0.18) so even the
 // smallest data values render visibly cyan rather than fading into
 // the no-data baseline.
+// No-data countries use a neutral grey-blue chosen to sit clearly ABOVE the
+// panel surface (--tb-surface #141826) and the page background
+// (--tb-bg #0A0E1A), AND visually distinct from the cyan gradient's low
+// end (#06283a) so unlit countries don't look like "low but present" data.
+// The previous baseline #161a24 was ~4 RGB units from --tb-surface, so the
+// continents blended into the sea.
+const NO_DATA_FILL = "#2f384d";
+
 function fillForValue(value: number | null, max: number): string {
-  if (value == null || value <= 0) return "#161a24"; // baseline, near-bg
-  if (max <= 0) return "#161a24";
+  if (value == null || value <= 0) return NO_DATA_FILL;
+  if (max <= 0) return NO_DATA_FILL;
   const logV = Math.log10(value + 1);
   const logM = Math.log10(max + 1);
   const t = Math.max(0.18, Math.min(1, logV / logM));
@@ -101,7 +109,13 @@ export function WorldHeatmap({
   return (
     <div className="relative" style={{ height }}>
       <ComposableMap
-        projectionConfig={{ scale: 145 }}
+        // Default view pulled north + scaled up so the data-rich band
+        // (Americas + EMEA + Oceania) fills the frame and empty ocean /
+        // Antarctica / Arctic white-out crop out. Highlighted markets
+        // currently span Brazil in the SW to Finland in the NE and NZ in
+        // the SE, so longitude can't be cropped without hiding data —
+        // just latitude + scale.
+        projectionConfig={{ center: [0, 25], scale: 180 }}
         width={900}
         height={height}
         style={{ width: "100%", height: "100%" }}
@@ -118,8 +132,8 @@ export function WorldHeatmap({
                   key={geo.rsmKey}
                   geography={geo}
                   fill={fill}
-                  stroke="var(--tb-bg)"
-                  strokeWidth={0.4}
+                  stroke="var(--tb-surface)"
+                  strokeWidth={0.5}
                   style={{
                     default: { outline: "none", cursor: datum ? "pointer" : "default" },
                     hover: { outline: "none", fill: datum ? "#00d2ff" : fill },
