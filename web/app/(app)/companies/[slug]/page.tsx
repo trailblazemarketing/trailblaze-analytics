@@ -298,7 +298,32 @@ export default async function CompanyDetailPage({
   // same axis). Cadence is resolved hierarchically: quarter → half_year
   // → full_year, so quarterly reporters (Flutter) keep their quarterly
   // view while semi-annual reporters (Playtech) still see their data.
-  const revRows = byCodeAug.get("revenue") ?? [];
+  //
+  // Entity-type-aware metric pref: lottery operators (Allwyn, FDJ
+  // United etc.) typically don't disclose `revenue` separately — they
+  // disclose GGR and lottery_revenue. Fall back through a kind-specific
+  // priority list and surface the chosen metric in the chart title so
+  // the substitution is transparent.
+  const REVENUE_CHART_PREF: Record<PanelKind, string[]> = {
+    operator: ["revenue", "ngr", "online_revenue"],
+    affiliate: ["revenue", "ngr"],
+    b2b_platform: ["revenue", "ngr"],
+    b2b_supplier: ["revenue", "ngr"],
+    lottery: ["revenue", "ggr", "lottery_revenue", "online_ggr"],
+    dfs: ["revenue", "ngr", "ggr"],
+    market: ["ggr", "online_ggr", "revenue"],
+  };
+  let revChartCode = "revenue";
+  let revChartLabel = "Revenue";
+  for (const code of REVENUE_CHART_PREF[kind] ?? ["revenue"]) {
+    const rs = byCodeAug.get(code) ?? [];
+    if (rs.length >= 1) {
+      revChartCode = code;
+      revChartLabel = rs[0]?.metric_display_name ?? code;
+      break;
+    }
+  }
+  const revRows = byCodeAug.get(revChartCode) ?? [];
   const quarterRows = revRows.filter((r) => r.period_type === "quarter");
   const halfYearRows = revRows.filter((r) => r.period_type === "half_year");
   const fullYearRows = revRows.filter((r) => r.period_type === "full_year");
@@ -323,7 +348,7 @@ export default async function CompanyDetailPage({
   const chartDataDense: TimeseriesPoint[] = chartRows.map((r) => ({
     period: r.period_code,
     period_start: r.period_start,
-    Revenue:
+    [revChartLabel]:
       r.metric_unit_type === "currency"
         ? nativeToEur(r.value_numeric, r.unit_multiplier, r.eur_rate)
         : toRawNumeric(r.value_numeric, r.unit_multiplier),
@@ -332,9 +357,9 @@ export default async function CompanyDetailPage({
   // broken segments at gaps (Recharts connectNulls={false}) instead of
   // smoothing across — e.g. BetMGM Q4-25 missing between Q3-25 and
   // Q1-26 should visibly break the line, not draw straight through.
-  const chartData = fillCadenceGaps(chartDataDense, chartCadence, ["Revenue"]);
+  const chartData = fillCadenceGaps(chartDataDense, chartCadence, [revChartLabel]);
   const beaconFlags: BeaconFlags = {
-    Revenue: new Set(
+    [revChartLabel]: new Set(
       chartRows
         .filter(
           (r) =>
@@ -716,7 +741,7 @@ export default async function CompanyDetailPage({
           <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
             <div>
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-                Revenue — {cadenceLabel}
+                {revChartLabel}{revChartCode !== "revenue" ? " (revenue proxy)" : ""} — {cadenceLabel}
               </h3>
               <p className="mt-0.5 text-[10px] text-tb-muted">
                 Last 12 periods · solid = disclosed · dotted = Beacon™
@@ -728,7 +753,7 @@ export default async function CompanyDetailPage({
             {chartData.length > 0 ? (
               <MetricTimeseries
                 data={chartData}
-                series={[{ key: "Revenue", label: "Revenue" }]}
+                series={[{ key: revChartLabel, label: revChartLabel }]}
                 beaconFlags={beaconFlags}
                 height={260}
               />
