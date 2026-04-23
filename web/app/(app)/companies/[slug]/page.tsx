@@ -564,6 +564,7 @@ export default async function CompanyDetailPage({
   // Competitive position — operators only, in their primary market
   let peersLb: ReturnType<typeof adaptEntityLeaderboardRows> | null = null;
   let peersMetric: string | null = null;
+  let peersScaleWarning: string | null = null;
   if (primaryMarket && kind === "operator") {
     const candidate = await query<{ code: string; n: number }>(
       `SELECT m.code, COUNT(DISTINCT mvc.entity_id)::int AS n
@@ -592,6 +593,73 @@ export default async function CompanyDetailPage({
       limit: 10,
     });
     peersLb = adaptEntityLeaderboardRows(peersRaw);
+
+    // Scale-sanity check: compare the leaderboard's summed EUR total
+    // against the disclosed market-level total for the same metric and
+    // (if any peers were returned) the latest period the leaderboard
+    // is actually showing. If the operator-sum is < 1% or > 110% of the
+    // disclosed national/market total, surface a ⚠ badge so analysts
+    // know the absolute scale may be off (e.g. Sweden online_ggr where
+    // Kindred + Betsson rows came in at 1/100th of the actual scale due
+    // to a units-multiplier extraction error). The widget still
+    // renders — relative ranking is useful even when scale is off.
+    if (peersLb.rows.length > 0 && peersLb.total) {
+      const latestPeriodForPeers = peersRaw[0]?.latest_period;
+      const marketTotalRow = latestPeriodForPeers
+        ? await query<{
+            value_numeric: string | null;
+            unit_multiplier: string | null;
+            currency: string | null;
+            eur_rate: string | null;
+          }>(
+            `SELECT mvc.value_numeric::text AS value_numeric,
+                    mvc.unit_multiplier, mvc.currency,
+                    fx.eur_rate::text AS eur_rate
+             FROM metric_value_canonical mvc
+             JOIN metrics m ON m.id = mvc.metric_id
+             JOIN periods p ON p.id = mvc.period_id
+             LEFT JOIN LATERAL (
+               SELECT f.eur_rate FROM fx_rates f
+               WHERE f.currency_code = COALESCE(UPPER(mvc.currency), 'EUR')
+                 AND f.rate_date <= p.end_date
+               ORDER BY f.rate_date DESC LIMIT 1
+             ) fx ON true
+             WHERE mvc.market_id = $1
+               AND mvc.entity_id IS NULL
+               AND m.code = $2
+               AND p.code = $3
+             LIMIT 1`,
+            [primaryMarket.market_id, peersMetric, latestPeriodForPeers],
+          )
+        : [];
+      const marketTotalEur = marketTotalRow[0]
+        ? nativeToEur(
+            marketTotalRow[0].value_numeric,
+            marketTotalRow[0].unit_multiplier as
+              | "units"
+              | "thousands"
+              | "millions"
+              | "billions"
+              | null,
+            marketTotalRow[0].eur_rate,
+          )
+        : null;
+      const peerSumEur = peersRaw.reduce((s, r) => {
+        const v =
+          r.unit_type === "currency"
+            ? nativeToEur(r.latest_value, r.unit_multiplier, r.latest_eur_rate)
+            : null;
+        return s + (v ?? 0);
+      }, 0);
+      if (marketTotalEur != null && marketTotalEur > 0 && peerSumEur > 0) {
+        const ratio = peerSumEur / marketTotalEur;
+        if (ratio < 0.01) {
+          peersScaleWarning = `Operator sum is ${(ratio * 100).toFixed(2)}% of disclosed market total — values likely under-scaled by a units-multiplier extraction error. Relative ranking still informative.`;
+        } else if (ratio > 1.1) {
+          peersScaleWarning = `Operator sum is ${(ratio * 100).toFixed(0)}% of disclosed market total — values likely over-scaled or double-counted across operators. Relative ranking still informative.`;
+        }
+      }
+    }
   }
 
   // Stock row (CD4) — only for entities with a ticker
@@ -879,7 +947,11 @@ export default async function CompanyDetailPage({
             subtitle={`${company.name} vs peers · ${(peersMetric ?? "revenue").replace(/_/g, " ")}`}
             valueLabel={(peersMetric ?? "revenue").toUpperCase()}
             rows={peersLb.rows}
-            total={peersLb.total}
+            total={
+              peersLb.total
+                ? { ...peersLb.total, scaleWarning: peersScaleWarning }
+                : null
+            }
             columns={["rank", "name", "value", "share", "yoy", "sparkline"]}
             maxRows={10}
           />

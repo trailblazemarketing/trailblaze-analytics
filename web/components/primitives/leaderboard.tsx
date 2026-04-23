@@ -67,7 +67,16 @@ export function Leaderboard({
   source?: SourceType | null;
   rows: LeaderboardRow[];
   columns?: LeaderboardColumn[];
-  total?: { valueFormatted: string; yoy?: number | null } | null;
+  total?: {
+    valueFormatted: string;
+    yoy?: number | null;
+    // When the operator-sum is implausibly small (<1%) or large (>110%)
+    // versus the disclosed market-level total, the page passes a
+    // human-readable warning string. We render a ⚠ badge next to the
+    // Total label rather than hiding the widget — the relative ranking
+    // is still useful when absolute scale is off.
+    scaleWarning?: string | null;
+  } | null;
   valueLabel?: string;
   nameLabel?: string; // M1: column header for the primary label (Entity | Market)
   maxRows?: number;
@@ -326,7 +335,17 @@ export function Leaderboard({
                   }
                   className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-tb-muted"
                 >
-                  Total
+                  <span className="inline-flex items-center gap-1.5">
+                    Total
+                    {total.scaleWarning && (
+                      <span
+                        className="cursor-help rounded border border-tb-beacon/40 bg-tb-beacon/10 px-1 font-normal normal-case tracking-normal text-tb-beacon"
+                        title={total.scaleWarning}
+                      >
+                        ⚠ scale
+                      </span>
+                    )}
+                  </span>
                 </td>
                 {effectiveColumns.includes("value") && (
                   <td className="px-3 py-1 text-right font-mono font-semibold text-tb-text">
