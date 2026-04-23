@@ -329,3 +329,148 @@ Sample entities inspected: `flutter`, `betsson`, `betmgm`,
   commit 627ba48 (tile suppression); fully fixes only when Issue 1
   also lands
 - Stale "As of" date — fixed by commit 64dc99f
+
+---
+
+# Session 5 (2026-04-23) — data quality + UI polish pass
+
+Findings from the post-audit polish session that hit /companies/betsson,
+/companies/betmgm, /companies/allwyn-international, /companies/flutter,
+/markets/united-kingdom, plus the Overview Markets widget. Some are new
+parser TODOs; some clarify the source-of-truth for issues touched by
+frontend fixes this session.
+
+## Issue 17: YoY is a UI-side computation in three places (documented)
+- What's wrong: not a bug — clarification. YoY is **never** stored as a
+  metric in the DB; it's recomputed at render time in three sites:
+  - `web/lib/scorecard-builder.ts` `buildKpiTile` — KPI tiles on
+    Company + Market detail pages. Picks `prev` by ±45-day proximity
+    to `latest.start_date - 365d`.
+  - `web/lib/queries/analytics.ts` `getEntityLeaderboard` and
+    `getMarketLeaderboard` — SQL LEFT JOIN that fetches
+    `prev_year_value` from a 270-430 day window.
+  - `web/lib/adapters.ts` — wraps both with `yoyPctGated` (currency
+    conversion + sanity clamp).
+- Implication: any YoY anomaly is debuggable without parser
+  involvement. Session 5 commit b6d89ce hardened all three: prev row
+  must match cadence (period_type), LTM rows excluded from
+  comparisons, outlier clamp tightened from ±500% to ±80%.
+- Priority: documentation only
+- Related Phase 2.5 Unit: none (UI-layer)
+
+## Issue 18: Sweden online_ggr — zero entity-attributed canonical rows
+- What's wrong: the audit brief noted Betsson Sweden showing
+  Kindred €10.8M / Betsson €1.6M (~100× too small). Investigation:
+  `metric_value_canonical` returns ZERO rows for
+  `(market='sweden', metric='online_ggr', entity_id IS NOT NULL)`
+  for any 2025/2026 period. The widget the brief refers to must be
+  reading from a different metric — but the symptom of "implausibly
+  small operator values vs disclosed market total" is real for
+  several Swedish operators on their other metrics too.
+- Evidence:
+  ```sql
+  SELECT e.name, p.code, mvc.value_numeric, mvc.currency
+  FROM metric_value_canonical mvc ... WHERE mk.slug='sweden'
+    AND m.code='online_ggr' AND mvc.entity_id IS NOT NULL;
+  -- → 0 rows
+  ```
+- Suggested fix: ensure the Sweden recogniser emits entity-attributed
+  online_ggr rows for SGA-licensed operators (Kindred / Betsson /
+  ATG / Svenska Spel / LeoVegas). Currently market-scope only.
+- Priority: high (entire competitive position widget for Sweden
+  reads from related metrics that may have unit issues)
+- Related Phase 2.5 Unit: A (Sweden recogniser) + B (entity attribution)
+
+## Issue 19: Allwyn lottery_revenue Q2-25 = 582 EUR M (10× off; likely H1 misparse)
+- What's wrong: Allwyn quarterly lottery_revenue: Q1-25=12.1, Q2-25=582,
+  Q4-25=32.0, FY-25=132.0. The 582 figure is roughly the H1 EUR
+  online_revenue line (1112.5 / 2 = 556) — a wrong-line capture.
+  Q2 should be ~30-50 EUR M consistent with siblings.
+- Evidence:
+  ```sql
+  SELECT p.code, mv.value_numeric, mv.currency, mv.notes, r.filename
+  FROM metric_values mv ... WHERE e.slug='allwyn-international'
+    AND m.code='lottery_revenue' AND p.code='Q2-25';
+  ```
+- Suggested fix: cross-quarter sanity at extraction — if a quarter is
+  >5× the median of sibling quarters within ±2 reporting periods,
+  flag for review.
+- Priority: medium (renders an outlier but quarters do flag visually)
+- Related Phase 2.5 Unit: A + C (sanity rules)
+
+## Issue 20: Allwyn `revenue` essentially absent (only Q3-25=1.02 raw)
+- What's wrong: confirmed cause of the brief's "No revenue history
+  for Allwyn" symptom — Allwyn doesn't disclose generic `revenue`
+  separately, only sub-metrics (lottery_revenue, casino_revenue,
+  online_revenue) and `ggr`. The lone Q3-25=1.02 row is a units-bug
+  (Issue 2 above; should be 1.02 BILLIONS = 1020M) for what's
+  probably the half-year online revenue line, not entity revenue.
+- Suggested fix: lottery operators don't report a revenue line in
+  the operator sense. Either (a) the parser should derive
+  `revenue` = lottery_revenue + casino_revenue + sportsbook_revenue
+  + online_revenue when a lottery entity has all four, or (b) accept
+  that lottery entities don't have revenue and let the UI fall back
+  through preferred-metric lists (which is what session 5 commit
+  5fe3781 does).
+- Priority: nice-to-have (frontend now falls back to GGR for the
+  chart; KPI tiles handled per panel kind)
+- Related Phase 2.5 Unit: C (derivation) — option (a) only
+
+## Issue 21: Q4-25 quarterly gap is widespread across operators
+- What's wrong: confirmed Q4-25 missing for Betsson (revenue),
+  BetMGM (revenue), and others. Q3-25 ↔ Q1-26 with Q4-25 absent.
+  Source: BetMGM and Betsson Q4-25 reports may be in `reports` table
+  but the recogniser didn't emit revenue/EBITDA rows for the right
+  period — possibly a date-parsing issue mistaking "fourth quarter"
+  for FY in some report templates.
+- Evidence:
+  ```sql
+  SELECT e.slug, COUNT(*) FILTER (WHERE p.code='Q4-25') AS q4_25,
+         COUNT(*) FILTER (WHERE p.code='Q3-25') AS q3_25,
+         COUNT(*) FILTER (WHERE p.code='Q1-26') AS q1_26
+  FROM metric_value_canonical mvc ...
+   WHERE m.code='revenue' AND mvc.entity_id IS NOT NULL
+   GROUP BY e.slug HAVING COUNT(*) FILTER (WHERE p.code='Q3-25') > 0;
+  ```
+- Suggested fix: Unit A reprocess should help if it's a recogniser
+  issue. If the gap persists post-reprocess, investigate the Q4-25
+  reports specifically.
+- Priority: high (visible gap on every chart; session 5 commit
+  275b9a5 now renders the gap as a broken line segment instead of
+  smoothing across, which makes the symptom visible to analysts but
+  doesn't fix the source)
+- Related Phase 2.5 Unit: A (likely auto-resolves)
+
+## Issue 22: Overview "Top Markets" sparklines missing for Belgium / France / Canada
+- What's wrong: the Overview page Markets widget renders em-dash in
+  the trend column for several rows. Either insufficient trailing
+  data (legitimate) or sparkline query bug (parser-adjacent).
+- Suggested fix: investigate `getMarketLeaderboard.spark_raw` for
+  these specific markets. If <2 periods of data exist for `online_ggr`
+  the em-dash is correct — and the parser TODO becomes "ingest more
+  market-scope online_ggr periods for these countries."
+- Priority: medium (confirmed via screenshot; not yet root-caused)
+- Related Phase 2.5 Unit: A + market data ingest
+
+## Issue 23: Overview Beacon™ column shows 0% for every row except Greece (4%)
+- What's wrong: Beacon coverage column in the Top Markets widget
+  reports near-zero everywhere. Two explanations: (a) Beacon
+  methodology hasn't generated estimates for most markets yet
+  (genuine 0%), or (b) the `beacon_coverage_pct` SQL in
+  `getMarketLeaderboard` is miscomputed.
+- Evidence:
+  ```sql
+  SELECT mk.slug,
+         COUNT(*) AS n_total,
+         COUNT(*) FILTER (WHERE disclosure_status IN ('beacon_estimate','derived')) AS n_beacon,
+         ROUND(100.0 * COUNT(*) FILTER (WHERE disclosure_status IN ('beacon_estimate','derived')) / NULLIF(COUNT(*), 0), 1) AS pct
+  FROM metric_value_canonical mvc JOIN markets mk ON mk.id = mvc.market_id
+  GROUP BY mk.slug ORDER BY pct DESC LIMIT 20;
+  ```
+- Suggested fix: run the query above first. If 0% really is real
+  everywhere, this is "Beacon™ methodology hasn't landed" and the
+  column will fill in naturally as Beacon estimates are written.
+  If pcts are non-zero in DB, the SQL needs review.
+- Priority: investigate-only (don't fix UI until methodology lands)
+- Related Phase 2.5 Unit: D (Beacon engine)
+
