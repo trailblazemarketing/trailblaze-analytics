@@ -76,6 +76,15 @@ export function Leaderboard({
     // Total label rather than hiding the widget — the relative ranking
     // is still useful when absolute scale is off.
     scaleWarning?: string | null;
+    // Override for the row-label ("Total" by default). Competitive
+    // Position on Company pages is a PEER SUBSET, not the full market,
+    // so it passes label="Peer subset total" to be honest about scope.
+    label?: string;
+    // Suppress the 100.0% share cell when the sum isn't actually a
+    // market-wide denominator — the share column still reads
+    // per-row vs sum-of-shown-rows, which is true but easy to read as
+    // "vs whole market" when the Total is called 100%.
+    suppressShare?: boolean;
   } | null;
   valueLabel?: string;
   nameLabel?: string; // M1: column header for the primary label (Entity | Market)
@@ -365,7 +374,7 @@ export function Leaderboard({
                   className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-tb-muted"
                 >
                   <span className="inline-flex items-center gap-1.5">
-                    Total
+                    {total.label ?? "Total"}
                     {total.scaleWarning && (
                       <span
                         className="cursor-help rounded border border-tb-beacon/40 bg-tb-beacon/10 px-1 font-normal normal-case tracking-normal text-tb-beacon"
@@ -383,7 +392,7 @@ export function Leaderboard({
                 )}
                 {effectiveColumns.includes("share") && (
                   <td className="px-3 py-1 text-right font-mono text-[10px] tabular-nums text-tb-muted">
-                    100.0%
+                    {total.suppressShare ? "—" : "100.0%"}
                   </td>
                 )}
                 {effectiveColumns.includes("yoy") && (

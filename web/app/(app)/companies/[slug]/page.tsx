@@ -1032,16 +1032,28 @@ export default async function CompanyDetailPage({
             csvFilename={`${company.slug}-geo.csv`}
           />
         )}
-        {/* Competitive position */}
+        {/* Competitive position — this is a peer subset (the top operators
+            the canonical view surfaces for the market), not every operator
+            in the market. Round-7 flagged that the "Total €10M / 100.0%"
+            row implied a market-wide denominator on /companies/betsson's
+            Sweden widget when Sweden's real online_ggr total is ~€210M.
+            Label the total "Peer subset total" and drop the 100% share
+            cell so the per-row shares read as "vs peer subset", not "vs
+            market". */}
         {peersLb && peersLb.rows.length > 0 && primaryMarket && (
           <Leaderboard
             title={`Competitive position — ${primaryMarket.name}`}
-            subtitle={`${company.name} vs peers · ${(peersMetric ?? "revenue").replace(/_/g, " ")}`}
+            subtitle={`${company.name} vs peer subset · ${(peersMetric ?? "revenue").replace(/_/g, " ")}`}
             valueLabel={(peersMetric ?? "revenue").toUpperCase()}
             rows={peersLb.rows}
             total={
               peersLb.total
-                ? { ...peersLb.total, scaleWarning: peersScaleWarning }
+                ? {
+                    ...peersLb.total,
+                    scaleWarning: peersScaleWarning,
+                    label: "Peer subset total",
+                    suppressShare: true,
+                  }
                 : null
             }
             columns={["rank", "name", "value", "share", "yoy", "sparkline"]}
