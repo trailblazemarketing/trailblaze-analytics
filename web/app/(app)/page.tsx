@@ -324,15 +324,39 @@ export default async function HomePage({
           </div>
 
           <aside className="lg:col-span-3 space-y-3">
-            {/* Right rail placeholder — populated with Top Markets +
-                Top Operators in the next commit. Inline note keeps
-                this slot reserved without leaving the column visually
-                empty during the staged rollout. */}
-            <div className="rounded-md border border-dashed border-tb-border/60 bg-tb-surface/40 p-4 text-[10px] text-tb-muted">
-              Right rail — Top Markets + Top Operators land in the next
-              commit. The full leaderboard composition continues below
-              for now.
-            </div>
+            {/* Top Markets — compact 10-row rail. Re-uses the
+                already-fetched markets.rows (which include
+                country-rollup augmentation, see Panel A merge above). */}
+            <Leaderboard
+              title="Top markets"
+              subtitle="By online GGR (latest)"
+              valueLabel="ONLINE GGR"
+              nameLabel="Country"
+              rows={markets.rows.slice(0, 10)}
+              total={null}
+              columns={["rank", "name", "value", "yoy", "sparkline"]}
+              maxRows={10}
+              showViewAll
+              viewAllHref="/markets"
+            />
+
+            {/* Top Operators — compact 10-row rail. Re-uses the
+                already-fetched entityRaw via the operator sub-tab,
+                falling back to the operator type explicitly so the
+                rail stays operator-focused regardless of which
+                sub-tab is active below. */}
+            <Leaderboard
+              title="Top operators"
+              subtitle="By latest revenue"
+              valueLabel="REVENUE"
+              nameLabel="Entity"
+              rows={entities.rows.slice(0, 10)}
+              total={null}
+              columns={["rank", "name", "value", "yoy", "sparkline"]}
+              maxRows={10}
+              showViewAll
+              viewAllHref="/companies?type=operator"
+            />
           </aside>
         </div>
 
