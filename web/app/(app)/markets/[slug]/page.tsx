@@ -41,7 +41,47 @@ import { formatDate, formatMetricValueEur } from "@/lib/format";
 import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import { query } from "@/lib/db";
 import type { MetricValueRow } from "@/lib/types";
-import { nativeToEur, toRawNumeric } from "@/lib/queries/analytics";
+import { nativeToEur, toRawNumeric, type CanonicalRow } from "@/lib/queries/analytics";
+
+// Derive an LTM row by summing the 4 most-recent consecutive quarter rows.
+// Returns null when fewer than 4 quarters exist, when they aren't strictly
+// consecutive (~90-day gaps), or when any value can't be EUR-converted.
+// Used to give "(LTM)"-labelled tiles a real LTM value rather than the
+// single latest quarter.
+function deriveLtmFromTrailingQuarters(rows: CanonicalRow[]): CanonicalRow | null {
+  const quarters = rows
+    .filter((r) => r.period_type === "quarter")
+    .sort((a, b) => b.period_start.localeCompare(a.period_start));
+  if (quarters.length < 4) return null;
+  const last4 = quarters.slice(0, 4);
+  for (let i = 0; i < 3; i++) {
+    const dayGap =
+      (new Date(last4[i].period_start).getTime() -
+        new Date(last4[i + 1].period_start).getTime()) /
+      86_400_000;
+    if (dayGap > 100 || dayGap < 80) return null;
+  }
+  let sumEur = 0;
+  for (const q of last4) {
+    const eur = nativeToEur(q.value_numeric, q.unit_multiplier, q.eur_rate);
+    if (eur == null) return null;
+    sumEur += eur;
+  }
+  const latest = last4[0];
+  return {
+    ...latest,
+    metric_value_id: `derived:ltm:${latest.metric_code}:${latest.period_code}`,
+    period_id: "derived",
+    period_code: `LTM-${latest.period_code}`,
+    period_display_name: `LTM ${latest.period_code}`,
+    period_type: "ltm",
+    value_numeric: String(sumEur),
+    unit_multiplier: "units",
+    currency: "EUR",
+    eur_rate: "1",
+    disclosure_status: "derived",
+  };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -288,6 +328,24 @@ export default async function MarketDetailPage({
   const turnoverRows = byCode.get("sportsbook_turnover") ?? [];
   if (handleRows.length === 0 && turnoverRows.length > 0) {
     byCode.set("sportsbook_handle", turnoverRows);
+  }
+
+  // Online GGR is presented in the panel as "Online GGR (LTM)". The plain
+  // "latest by start_date" pick from buildKpiTile mistakes a single
+  // quarter for LTM (e.g. UK Q4-25 € 1.71B vs the true LTM ~ € 9B).
+  // Prefer an actual LTM-period row; otherwise derive one by summing
+  // the 4 most-recent consecutive quarters; otherwise leave the data
+  // unchanged so the tile shows whatever it can (still labelled LTM —
+  // a future enhancement is to drop the suffix when no LTM is derivable).
+  const onlineGgrSeries = byCode.get("online_ggr") ?? [];
+  if (onlineGgrSeries.length > 0) {
+    const hasNativeLtm = onlineGgrSeries.some((r) => r.period_type === "ltm");
+    if (!hasNativeLtm) {
+      const derivedLtm = deriveLtmFromTrailingQuarters(onlineGgrSeries);
+      if (derivedLtm) {
+        byCode.set("online_ggr", [derivedLtm, ...onlineGgrSeries]);
+      }
+    }
   }
 
   // Total GGR vs Online GGR: when the upstream `ggr` series carries the
