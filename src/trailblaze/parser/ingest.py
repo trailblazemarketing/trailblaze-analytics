@@ -32,6 +32,23 @@ def _strip_glyphs(s: str | None) -> str | None:
     cleaned = _GLYPH_STRIP_RE.sub("", s).strip()
     return cleaned if cleaned else None
 
+
+# Percentage-metric codes should always land in a sane range. Negative
+# values are legitimate (net margins can go negative under losses), and
+# a small overshoot over 100% is tolerable (market shares occasionally
+# exceed 100% on rounded + aggregated scopes), but values outside
+# [-100, 200] are almost always parser unit errors — BetMGM "22/15" and
+# similar bare integers were likely percentage extractions that lost
+# the % scale cue, or the opposite (an absolute value parked in a
+# percentage slot).
+_PCT_PATTERNS: tuple[str, ...] = ("_pct", "margin", "market_share")
+
+
+def _is_percentage_metric(code: str | None) -> bool:
+    if not code:
+        return False
+    return any(p in code for p in _PCT_PATTERNS)
+
 from trailblaze.db.models import (
     Entity,
     MetricValue,
@@ -170,6 +187,19 @@ def ingest(
                     "no entity or market resolved."
                 )
                 continue
+
+            # Sanitiser 3.3 — percentage range enforcement.
+            # Flag (don't mutate) percentage-family metrics whose value sits
+            # outside [-100, 200]. Preserves the original value for audit
+            # while surfacing the anomaly on reports.parse_warnings.
+            if _is_percentage_metric(m.metric_code) and m.value_numeric is not None:
+                _v = float(m.value_numeric)
+                if _v < -100 or _v > 200:
+                    warnings.append(
+                        f"[needs_review] Percentage out of range for "
+                        f"{m.metric_code!r} {m.period_code}: {_v} "
+                        f"(expected [-100, 200]) — unit cue likely dropped."
+                    )
 
             session.add(MetricValue(
                 entity_id=entity_id,
