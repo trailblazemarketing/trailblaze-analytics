@@ -75,6 +75,18 @@ export async function getBiggestRevenueGrowers(limit = 6): Promise<MoverRow[]> {
                       AND start_date >= (cur.start_date - INTERVAL '400 days')::date)
      WHERE cur.value_numeric IS NOT NULL AND prev.value_numeric IS NOT NULL
        AND prev.value_numeric <> 0
+       -- Biggest Growers is a "plausible movers" list, not a raw
+       -- magnitude ranking. Implausibly large YoY moves (BetMGM Q1-26
+       -- -51.8%, Catena Media +52.9%) are almost always parser
+       -- unit/currency errors rather than real business shifts — round-4
+       -- QA flagged them as regressions. Suppress in SQL so the widget
+       -- never surfaces them, regardless of sign. ±50% was the threshold
+       -- the QA report called out; real big movers sit well within it
+       -- (DraftKings FY growth ~+30%, Flutter H1 ~+8%).
+       AND ABS(100.0 * (
+         (cur.value_numeric / NULLIF(cur.eur_rate::numeric, 0)) -
+         (prev.value_numeric / NULLIF(prev.eur_rate::numeric, 0))
+       ) / NULLIF(ABS(prev.value_numeric / NULLIF(prev.eur_rate::numeric, 0)), 0)) < 50
      ORDER BY (
        (cur.value_numeric / NULLIF(cur.eur_rate, 0)) -
        (prev.value_numeric / NULLIF(prev.eur_rate, 0))
