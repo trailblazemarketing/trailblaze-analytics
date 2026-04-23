@@ -223,12 +223,13 @@ export default async function MarketDetailPage({
          LIMIT 30`,
         [market.id],
       ),
-      query<MetricValueRow & { eur_rate: string | null }>(
+      query<MetricValueRow & { eur_rate: string | null; period_type: string }>(
         `SELECT mvc.metric_value_id, mvc.entity_id, mvc.market_id, mvc.metric_id,
                 m.code AS metric_code, m.display_name AS metric_display_name,
                 m.unit_type AS metric_unit_type,
                 mvc.period_id, p.code AS period_code, p.display_name AS period_display_name,
                 p.start_date AS period_start, p.end_date AS period_end,
+                p.period_type,
                 mvc.report_id, mvc.source_type, mvc.value_numeric, mvc.value_text,
                 mvc.currency, mvc.unit_multiplier, mvc.disclosure_status,
                 mvc.confidence_score, mvc.published_timestamp,
@@ -282,15 +283,17 @@ export default async function MarketDetailPage({
 
   // Build time matrix rows
   const tmRows: TimeMatrixRow[] = [];
-  const byMetric = new Map<string, (MetricValueRow & { eur_rate: string | null })[]>();
+  const byMetric = new Map<string, (MetricValueRow & { eur_rate: string | null; period_type: string })[]>();
   for (const r of tmRowsRaw) {
     if (!byMetric.has(r.metric_code)) byMetric.set(r.metric_code, []);
     byMetric.get(r.metric_code)!.push(r);
   }
 
-  // Opt-pass 2: primary market time-series chart. Pick the best-covered
-  // metric we have for this market from a prioritized list, then render a
-  // line chart with solid-disclosed + dotted-Beacon segments.
+  // Primary market time-series chart. Pick the best-covered metric from a
+  // prioritized list, then render a line chart with solid-disclosed +
+  // dotted-Beacon segments. Mirror of company-page CD5: filter to a single
+  // period_type cohort (quarter → half_year → full_year) so annual / LTM
+  // values don't tower over quarterly on the same axis (sawtooth).
   const CHART_PREF = [
     "online_ggr",
     "online_ngr",
@@ -300,9 +303,26 @@ export default async function MarketDetailPage({
     "ggr",
   ];
   let chartMetricCode: string | null = null;
+  let chartCadenceLabel = "Quarterly";
+  let chartCohort: (MetricValueRow & { eur_rate: string | null; period_type: string })[] = [];
   for (const code of CHART_PREF) {
-    if ((byMetric.get(code) ?? []).length >= 3) {
+    const rs = byMetric.get(code) ?? [];
+    if (rs.length === 0) continue;
+    const quarters = rs.filter((r) => r.period_type === "quarter");
+    const halves = rs.filter((r) => r.period_type === "half_year");
+    const annuals = rs.filter((r) => r.period_type === "full_year");
+    const { cohort, cadenceLabel } =
+      quarters.length >= 3
+        ? { cohort: quarters, cadenceLabel: "Quarterly" }
+        : halves.length >= 3
+        ? { cohort: halves, cadenceLabel: "Half-Year" }
+        : annuals.length >= 3
+        ? { cohort: annuals, cadenceLabel: "Annual" }
+        : { cohort: [] as typeof rs, cadenceLabel: "Quarterly" };
+    if (cohort.length >= 3) {
       chartMetricCode = code;
+      chartCohort = cohort;
+      chartCadenceLabel = cadenceLabel;
       break;
     }
   }
@@ -310,7 +330,7 @@ export default async function MarketDetailPage({
   let chartBeaconFlags: BeaconFlags = {};
   let chartLabel = "";
   if (chartMetricCode) {
-    const rs = [...(byMetric.get(chartMetricCode) ?? [])].sort((a, b) =>
+    const rs = [...chartCohort].sort((a, b) =>
       a.period_start.localeCompare(b.period_start),
     );
     chartLabel = rs[0]?.metric_display_name ?? chartMetricCode;
@@ -475,7 +495,7 @@ export default async function MarketDetailPage({
           <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
             <div>
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-                {chartLabel} — time series
+                {chartLabel} — {chartCadenceLabel}
               </h3>
               <p className="mt-0.5 text-[10px] text-tb-muted">
                 Last {chartData.length} periods · solid = disclosed · dotted = Beacon™
