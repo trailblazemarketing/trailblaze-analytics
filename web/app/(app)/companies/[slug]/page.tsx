@@ -158,7 +158,12 @@ export default async function CompanyDetailPage({
   const primaryMarket = primaryMarketRow[0] ?? null;
   const primaryMarketsList = primaryMarketRow.map((m) => m.name);
 
-  // Recent periods this entity actually reports in
+  // Recent periods this entity actually reports in. Pulled wide across the
+  // candidate cadences so the cadence picker below can pick a single
+  // cohort. Excludes `ltm` and `nine_months` (overlapping aggregates that
+  // confuse a breakdown column header) and `custom` /
+  // `trading_update_window`. Same pattern as commit f6de180 on the markets
+  // page time-matrix.
   const entityPeriodRows = await query<{
     code: string;
     display_name: string | null;
@@ -170,12 +175,44 @@ export default async function CompanyDetailPage({
      WHERE p.id IN (
        SELECT DISTINCT period_id FROM metric_values WHERE entity_id = $1
      )
-       AND p.period_type IN ('month','quarter','full_year','half_year','ltm')
+       AND p.period_type IN ('quarter','half_year','full_year','month')
      ORDER BY p.start_date DESC
-     LIMIT 12`,
+     LIMIT 60`,
     [company.id],
   );
-  const recentPeriods = entityPeriodRows;
+  // Cadence picker — same pattern as f6de180 (markets time-matrix).
+  // Preferred cadence = quarter; fall back to half_year, then full_year,
+  // finally month so US-state-style monthly-only feeds still render.
+  const TM_CADENCE_PREF: {
+    pt: "quarter" | "half_year" | "full_year" | "month";
+    label: string;
+    n: number;
+  }[] = [
+    { pt: "quarter", label: "Quarters", n: 12 },
+    { pt: "half_year", label: "Half-years", n: 8 },
+    { pt: "full_year", label: "Years", n: 6 },
+    { pt: "month", label: "Months", n: 12 },
+  ];
+  let recentPeriods: typeof entityPeriodRows = [];
+  let tmCadenceLabel = "Periods";
+  for (const { pt, label, n } of TM_CADENCE_PREF) {
+    const cohort = entityPeriodRows.filter((p) => p.period_type === pt);
+    if (cohort.length >= 3) {
+      recentPeriods = cohort
+        .slice(0, n)
+        .sort((a, b) => a.start_date.localeCompare(b.start_date));
+      tmCadenceLabel = label;
+      break;
+    }
+  }
+  // Fall back to the raw newest-first set so widgets don't go empty for
+  // entities with fewer than 3 periods of any single cadence (very early
+  // stage entities, single-report coverage, etc.).
+  if (recentPeriods.length === 0) {
+    recentPeriods = [...entityPeriodRows]
+      .slice(0, 12)
+      .sort((a, b) => a.start_date.localeCompare(b.start_date));
+  }
 
   // T2 small-fix 2: augment byCode with derived ebitda_margin rows where
   // disclosed values are missing but ebitda + revenue both exist. All
@@ -712,7 +749,7 @@ export default async function CompanyDetailPage({
       <div className="grid gap-3 lg:grid-cols-2">
         {geoRows.length > 0 && (
           <TimeMatrix
-            title={`Geographic breakdown${geoMetricLabel ? ` — ${geoMetricLabel}` : ""}`}
+            title={`Geographic breakdown${geoMetricLabel ? ` — ${geoMetricLabel}` : ""} (last ${orderedPeriods.length} ${tmCadenceLabel.toLowerCase()})`}
             periods={orderedPeriods}
             periodLabels={periodLabels}
             rows={geoRows}
