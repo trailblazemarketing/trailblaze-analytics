@@ -57,7 +57,13 @@ export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
        JOIN periods p ON p.id = mv.period_id
        LEFT JOIN LATERAL (
          SELECT f.eur_rate FROM fx_rates f
-         WHERE f.currency_code = COALESCE(UPPER(mv.currency), 'EUR')
+         -- London-listed quotes arrive as GBp (pence) but fx_rates is
+         -- keyed on GBP. Treat GBp as GBP here; the per-row value is
+         -- divided by 100 in the TS layer to convert pence→pounds.
+         WHERE f.currency_code = CASE WHEN UPPER(mv.currency) = 'GBP' OR mv.currency = 'GBp'
+                                        THEN 'GBP'
+                                      ELSE COALESCE(UPPER(mv.currency), 'EUR')
+                                 END
            AND f.rate_date <= p.end_date
          ORDER BY f.rate_date DESC LIMIT 1
        ) fx ON true
@@ -106,7 +112,16 @@ export async function getOperatorStockHeatmap(): Promise<HeatmapCell[]> {
         : mult === "thousands"
         ? 1_000
         : 1;
-    const mcNative = mcRaw != null ? mcRaw * scale : null;
+    // Pence→pound normalisation: London-listed entities (Entain ENT,
+    // evoke plc EVOK) report market_cap in GBp = 1/100 GBP. The fx_rates
+    // JOIN already treats GBp as GBP, so to make the rate apply
+    // correctly we divide the raw value by 100 here. Without this the
+    // Combined Market Cap KPI tile rendered €507.81B (Entain alone
+    // contributed ~€390B).
+    const gbpPence = r.mc_currency === "GBp";
+    const penceAdjust = gbpPence ? 100 : 1;
+    const mcNative =
+      mcRaw != null ? (mcRaw * scale) / penceAdjust : null;
     const eurRate =
       r.mc_eur_rate != null && Number(r.mc_eur_rate) > 0
         ? Number(r.mc_eur_rate)
