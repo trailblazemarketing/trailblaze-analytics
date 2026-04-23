@@ -194,6 +194,41 @@ def ingest(
 
         warnings.extend(extraction.warnings)
 
+        # Sanitiser 3.1 — NGR > Revenue sanity flag.
+        # NGR is definitionally <= Revenue (Revenue minus bonuses/promos).
+        # When extraction emits NGR > Revenue for the same (entity, period)
+        # at the entity level (market_name null), the pair is almost always
+        # a unit-mismatch or scale error at parser time — flag for review
+        # without mutating the stored values. Only compare when currency
+        # matches; mixed-currency pairs need FX-aware comparison that
+        # belongs in the canonical view, not here.
+        _bucket: dict[tuple[str | None, str], dict[str, object]] = {}
+        for em in extraction.metrics:
+            if em.market_name:
+                continue  # entity-level only
+            if em.metric_code not in ("ngr", "revenue"):
+                continue
+            _bucket.setdefault((em.entity_name, em.period_code), {})[em.metric_code] = em
+        for (ent_name, per_code), pair in _bucket.items():
+            ngr = pair.get("ngr")
+            rev = pair.get("revenue")
+            if ngr is None or rev is None:
+                continue
+            if ngr.value_numeric is None or rev.value_numeric is None:
+                continue
+            if ngr.currency != rev.currency:
+                continue
+            _mult = {"billions": 10**9, "millions": 10**6, "thousands": 10**3}
+            ngr_native = float(ngr.value_numeric) * _mult.get(ngr.unit_multiplier or "", 1)
+            rev_native = float(rev.value_numeric) * _mult.get(rev.unit_multiplier or "", 1)
+            if ngr_native > rev_native:
+                warnings.append(
+                    f"[needs_review] NGR > Revenue for {ent_name or '(unnamed)'} "
+                    f"{per_code}: ngr={ngr.value_numeric} {ngr.unit_multiplier or 'units'} "
+                    f"{ngr.currency}, rev={rev.value_numeric} {rev.unit_multiplier or 'units'} "
+                    f"{rev.currency} — parser unit/scale mismatch suspected."
+                )
+
     # Surface auto-created entities so the catalog can be curated later.
     if resolver.auto_added_entities:
         warnings.append(
