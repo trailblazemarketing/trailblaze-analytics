@@ -56,6 +56,35 @@ function nativeTooltip(opts: {
   return nat;
 }
 
+// Batch-aware detection: when the MEDIAN raw value_numeric in this set of
+// leaderboard rows already sits in the 10^5–10^8 band, the rows are stored
+// as RAW currency units (e.g. NJ DGE regulator output: FanDuel =
+// 62_683_138 USD). A tiny outlier in the same batch (Betinia =
+// 4_873 USD) was being re-interpreted by inferUnitMultiplier as "millions"
+// and inflated to $4.87B, poisoning `totalEur` and crushing every other
+// operator's share to ~1%. When the batch clearly stores raw units, we
+// must suppress the per-row millions inference — the NULL multiplier is
+// correct in that context.
+function rawDollarScale(rows: LeaderboardRowRaw[]): boolean {
+  const vals: number[] = [];
+  for (const r of rows) {
+    if (r.unit_type !== "currency") continue;
+    if (r.latest_value == null) continue;
+    // Only consider rows where the multiplier is absent — those are the
+    // ambiguous ones. Rows with an explicit multiplier are already scaled
+    // correctly and irrelevant to the heuristic.
+    if (r.unit_multiplier) continue;
+    const n = Math.abs(Number(r.latest_value));
+    if (Number.isFinite(n) && n > 0) vals.push(n);
+  }
+  if (vals.length < 3) return false;
+  vals.sort((a, b) => a - b);
+  const median = vals[Math.floor(vals.length / 2)];
+  // Threshold: 10^5 (100 000). A median above that implies raw units; below
+  // it the classic "stored as millions, multiplier dropped" shape rules.
+  return median >= 100_000;
+}
+
 export function adaptEntityLeaderboardRows(
   raw: LeaderboardRowRaw[],
   opts?: { hrefBase?: string; totalBasis?: "sum" | null },
@@ -65,15 +94,19 @@ export function adaptEntityLeaderboardRows(
 } {
   const hrefBase = opts?.hrefBase ?? "/companies";
 
+  const suppressInference = rawDollarScale(raw);
+
   const withEur = raw.map((r) => {
     const isCurrency = r.unit_type === "currency";
     const eur = isCurrency
-      ? nativeToEurInferred(
-          r.latest_value,
-          r.unit_multiplier,
-          r.latest_eur_rate,
-          r.metric_code,
-        )
+      ? suppressInference
+        ? nativeToEur(r.latest_value, r.unit_multiplier, r.latest_eur_rate)
+        : nativeToEurInferred(
+            r.latest_value,
+            r.unit_multiplier,
+            r.latest_eur_rate,
+            r.metric_code,
+          )
       : null;
     const rawVal = toRawNumeric(r.latest_value, r.unit_multiplier);
     const yoy = yoyPctGated({
