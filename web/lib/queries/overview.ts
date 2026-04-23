@@ -402,17 +402,18 @@ export interface CommentaryCard {
 }
 
 export async function recentCommentaryCards(limit = 3): Promise<CommentaryCard[]> {
-  // Dedup the same narrative content appearing across multiple
-  // source reports — the QA report saw the Entain Apr-16 excerpt
-  // rendered twice on Overview / Operators because two reports
-  // captured the same paragraph. DISTINCT ON (entity_id, body_hash)
-  // collapses them to one row, keeping the most-recent published_at
-  // as the surviving anchor.
+  // Two dedup passes:
+  //   1. dup_rn — collapse byte-identical (or lead-paragraph-identical)
+  //      narratives that landed in multiple reports. md5 of the leading
+  //      200 chars partitions; most-recent wins per (entity, body_hash).
+  //   2. entity_rn — DIVERSIFY across entities. Without this, a single
+  //      entity with 3 distinct narrative sections takes all 3 visible
+  //      slots (Overview was showing Evolution × 3 post-Unit-A). Picks
+  //      the most-recent surviving row per entity, then the outer
+  //      query orders that diversified set by timestamp and LIMITs.
   //
-  // The body_hash is md5 of the first 200 chars (trimmed + collapsed
-  // whitespace) — long enough to distinguish substantive variants,
-  // short enough that two reports quoting the same lead paragraph
-  // collapse to one row even when the trailing text differs.
+  // /operators uses the same shape in getRecentCommentary — kept in
+  // lockstep so neither surface regresses again.
   return await query<CommentaryCard>(
     `WITH ranked AS (
        SELECT n.id, n.report_id, n.entity_id, n.market_id, n.content,
@@ -441,17 +442,25 @@ export async function recentCommentaryCards(limit = 3): Promise<CommentaryCard[]
          AND COALESCE(s.source_type,'') IN (
            'trailblaze_pdf','analyst_note','industry_trade'
          )
+     ),
+     one_per_entity AS (
+       SELECT ranked.*,
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(entity_id, market_id, id)
+                ORDER BY published_timestamp DESC NULLS LAST, id
+              ) AS entity_rn
+       FROM ranked WHERE dup_rn = 1
      )
-     SELECT ranked.id, ranked.report_id AS "reportId",
+     SELECT one_per_entity.id, one_per_entity.report_id AS "reportId",
             e.name AS "entityName",
             mk.name AS "marketName",
-            ranked.published_timestamp::text AS "publishedAt",
-            ranked.content
-     FROM ranked
-     LEFT JOIN entities e ON e.id = ranked.entity_id
-     LEFT JOIN markets mk ON mk.id = ranked.market_id
-     WHERE ranked.dup_rn = 1
-     ORDER BY ranked.published_timestamp DESC NULLS LAST
+            one_per_entity.published_timestamp::text AS "publishedAt",
+            one_per_entity.content
+     FROM one_per_entity
+     LEFT JOIN entities e ON e.id = one_per_entity.entity_id
+     LEFT JOIN markets mk ON mk.id = one_per_entity.market_id
+     WHERE entity_rn = 1
+     ORDER BY one_per_entity.published_timestamp DESC NULLS LAST
      LIMIT $1`,
     [limit],
   );
