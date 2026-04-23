@@ -25,6 +25,7 @@ import { Leaderboard } from "@/components/primitives/leaderboard";
 import type { LeaderboardRow } from "@/components/primitives/leaderboard";
 import { TickerStrip } from "@/components/overview/ticker-strip";
 import { MoversRow } from "@/components/overview/movers-row";
+import { HeroTile } from "@/components/overview/hero-tile";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { Badge } from "@/components/ui/badge";
 import { ReportLink } from "@/components/reports/report-link";
@@ -34,6 +35,12 @@ import { displayReportFilename } from "@/lib/formatters/reportFilename";
 import type { Report } from "@/lib/types";
 import { getCountryRollupValues } from "@/lib/queries/markets";
 import { MarketBarChart } from "@/components/charts/market-bar";
+import {
+  countCanonicalEntities,
+  countTrackedMarkets,
+  sumLatestPerEntity,
+  sumLatestPerMarket,
+} from "@/lib/queries/overview";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -65,6 +72,12 @@ export default async function HomePage({
     marginLeaders,
     commentary,
     countryRollup,
+    heroEntities,
+    heroMarkets,
+    heroRevenue,
+    heroOnlineGgr,
+    heroCasinoGgr,
+    heroSportsbookGgr,
   ] = await Promise.all([
     // M2: default back to online_ggr — primary Markets KPI per UI_SPEC_2 Panel 7.
     // Country scope + rollup (M4) augments coverage for US / Canada from
@@ -91,7 +104,24 @@ export default async function HomePage({
     // O1 + M4: country-rollup companion — sum-of-children used to augment the
     // markets leaderboard for countries without a native online_ggr row.
     getCountryRollupValues({ metricCode: "online_ggr" }),
+    // Hero band aggregates — counts + EUR-converted sums across the
+    // canonical entity / country-market sets. YoY computed cadence-matched
+    // and ±80% clamped (consistent with Fix A in commit b6d89ce).
+    countCanonicalEntities(),
+    countTrackedMarkets(),
+    sumLatestPerEntity("revenue"),
+    sumLatestPerMarket("online_ggr"),
+    sumLatestPerMarket("casino_ggr"),
+    sumLatestPerMarket("sportsbook_ggr"),
   ]);
+
+  // Compute hero YoYs only when both sides are present and within bounds
+  function heroYoy(eur: number, prev: number | null): number | null {
+    if (prev == null || prev <= 0) return null;
+    const pct = ((eur - prev) / Math.abs(prev)) * 100;
+    if (!Number.isFinite(pct) || Math.abs(pct) > 80) return null;
+    return pct;
+  }
   const periodGroups = groupPeriodsForSelector(populatedPeriods);
 
   const markets = adaptMarketLeaderboardRows(marketRaw);
@@ -147,14 +177,57 @@ export default async function HomePage({
       <div className="space-y-3 px-6 py-3">
         <header className="flex items-end justify-between">
           <div>
-            <h1 className="text-lg font-semibold">Overview</h1>
-            <p className="text-xs text-tb-muted">
-              Live analyst home — what's new, what's biggest, what's moving.
-              All monetary values in EUR (hover for native).
+            <h1 className="text-3xl font-semibold tracking-tight text-tb-text">
+              Overview
+            </h1>
+            <p className="mt-0.5 text-[11px] text-tb-muted">
+              Command centre — live iGaming intelligence
             </p>
           </div>
           <PeriodSelector groups={periodGroups} currentCode={periodCode} />
         </header>
+
+        {/* Hero KPI band — six tiles. Counts on the left (Companies /
+            Markets) carry no YoY; the four currency aggregates render
+            EUR-converted sums of latest-period values across the
+            canonical entity (Total Revenue) or country-scope market
+            (Online / Casino / Sportsbook GGR) sets. */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <HeroTile
+            label="Companies tracked"
+            value={heroEntities.toLocaleString()}
+            subtitle="operators · affiliates · B2B"
+          />
+          <HeroTile
+            label="Markets tracked"
+            value={heroMarkets.total.toLocaleString()}
+            subtitle={`${heroMarkets.countries} countries + ${heroMarkets.states} states`}
+          />
+          <HeroTile
+            label="Total revenue tracked"
+            value={formatEur(heroRevenue.eur)}
+            subtitle={`${heroRevenue.entityCount} entities · latest period each`}
+            yoyPct={heroYoy(heroRevenue.eur, heroRevenue.prevEur)}
+          />
+          <HeroTile
+            label="Online GGR (global)"
+            value={formatEur(heroOnlineGgr.eur)}
+            subtitle={`${heroOnlineGgr.marketCount} country markets`}
+            yoyPct={heroYoy(heroOnlineGgr.eur, heroOnlineGgr.prevEur)}
+          />
+          <HeroTile
+            label="Casino GGR"
+            value={formatEur(heroCasinoGgr.eur)}
+            subtitle={`${heroCasinoGgr.marketCount} country markets`}
+            yoyPct={heroYoy(heroCasinoGgr.eur, heroCasinoGgr.prevEur)}
+          />
+          <HeroTile
+            label="Sportsbook GGR"
+            value={formatEur(heroSportsbookGgr.eur)}
+            subtitle={`${heroSportsbookGgr.marketCount} country markets`}
+            yoyPct={heroYoy(heroSportsbookGgr.eur, heroSportsbookGgr.prevEur)}
+          />
+        </div>
 
         {/* Panel A + B: Markets leaderboard (2/3) · Right column stacked (1/3)
             items-start: each panel takes its natural content height. Without
