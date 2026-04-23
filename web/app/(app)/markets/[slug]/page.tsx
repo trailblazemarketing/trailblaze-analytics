@@ -290,6 +290,41 @@ export default async function MarketDetailPage({
     byCode.set("sportsbook_handle", turnoverRows);
   }
 
+  // Total GGR vs Online GGR: when the upstream `ggr` series carries the
+  // same EUR-converted value as `online_ggr` for the same period, the
+  // source only disclosed online (no retail/land-based component) and
+  // showing both tiles with identical numbers is misleading. Suppress
+  // the Total GGR tile so it renders em-dash rather than implying a
+  // distinct total. Comparison uses latest period of each series; rows
+  // arrive sorted DESC by start_date.
+  const ggrRows = byCode.get("ggr") ?? [];
+  const onlineGgrRows = byCode.get("online_ggr") ?? [];
+  if (ggrRows.length > 0 && onlineGgrRows.length > 0) {
+    const ggrLatest = ggrRows[0];
+    const onlineGgrForPeriod = onlineGgrRows.find(
+      (r) => r.period_code === ggrLatest.period_code,
+    );
+    if (onlineGgrForPeriod) {
+      const ggrEur = nativeToEur(
+        ggrLatest.value_numeric,
+        ggrLatest.unit_multiplier,
+        ggrLatest.eur_rate,
+      );
+      const onlineGgrEur = nativeToEur(
+        onlineGgrForPeriod.value_numeric,
+        onlineGgrForPeriod.unit_multiplier,
+        onlineGgrForPeriod.eur_rate,
+      );
+      if (
+        ggrEur != null &&
+        onlineGgrEur != null &&
+        Math.abs(ggrEur - onlineGgrEur) / Math.max(Math.abs(ggrEur), 1) < 0.01
+      ) {
+        byCode.set("ggr", []);
+      }
+    }
+  }
+
   const tiles = buildPanelTiles("market", byCode, beacon);
 
   // Build time matrix rows
