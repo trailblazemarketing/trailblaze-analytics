@@ -567,16 +567,29 @@ export default async function CompanyDetailPage({
 
   const subtitleParts = [
     company.headquarters_country ? `HQ ${company.headquarters_country}` : null,
-    `${marketsForEntity.length} market${marketsForEntity.length === 1 ? "" : "s"}`,
+    marketsForEntity.length > 0
+      ? `${marketsForEntity.length} market${marketsForEntity.length === 1 ? "" : "s"}`
+      : null,
     primaryMarketsList.length > 0
       ? `Primary: ${primaryMarketsList.slice(0, 3).join(", ")}`
       : null,
   ].filter(Boolean);
 
-  const headerPeriod =
-    Array.from(byCode.values())[0]?.[0]?.period_display_name ??
-    Array.from(byCode.values())[0]?.[0]?.period_code ??
-    null;
+  // Header period is the most recent period across all metric series, not
+  // whichever metric happens to be first in the byCode insertion order
+  // (which is alphabetical by metric_code from getScorecardSeries — so
+  // the original "As of" date often pinned to active_customers' or
+  // arpu's stalest snapshot rather than the freshest aggregate).
+  let latestPeriodEnd: string | null = null;
+  let headerPeriod: string | null = null;
+  for (const rows of byCodeAug.values()) {
+    for (const r of rows) {
+      if (r.period_end && (!latestPeriodEnd || r.period_end > latestPeriodEnd)) {
+        latestPeriodEnd = r.period_end;
+        headerPeriod = r.period_display_name ?? r.period_code;
+      }
+    }
+  }
 
   return (
     <div className="space-y-3">
