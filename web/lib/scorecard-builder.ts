@@ -339,6 +339,42 @@ export function augmentDerivedEbitdaMargin(
   return next;
 }
 
+// Per-panel-kind tile suppression: irrelevant tiles for non-operator
+// entity types render em-dash for any data that happens to be present
+// because the source extractor often misclassifies a small adjacent
+// number (e.g. a casino-side promotional spend on a lottery operator).
+// Until the proper specialised panels land (Phase 2.5 Unit C/D), gate
+// the generic Operator-style recipes so lottery / affiliate / B2B / DFS
+// pages don't show Casino Rev or Sportsbook Rev tiles that don't fit
+// the entity. For lottery, casino_revenue stays visible only when
+// `casino_ggr` is also disclosed — that signals a real casino arm
+// rather than parser bleed-through.
+function isSuppressedForKind(
+  kind: PanelKind,
+  code: string,
+  byCode: Map<string, CanonicalRow[]>,
+): boolean {
+  switch (kind) {
+    case "lottery":
+      if (code === "sportsbook_revenue") return true;
+      if (code === "casino_revenue") {
+        const hasCasinoGgr = (byCode.get("casino_ggr") ?? []).some(
+          (r) => r.value_numeric != null,
+        );
+        return !hasCasinoGgr;
+      }
+      return false;
+    case "affiliate":
+    case "b2b_platform":
+    case "b2b_supplier":
+    case "dfs":
+      return code === "casino_revenue" || code === "sportsbook_revenue";
+    case "operator":
+    case "market":
+      return false;
+  }
+}
+
 // Filter: a panel tile is shown only if we have >=1 row of data (not all null).
 // Otherwise hide (per spec: "Better to have 7 tiles than 8 with a blank one").
 export function buildPanelTiles(
@@ -347,10 +383,16 @@ export function buildPanelTiles(
   beacon: Map<string, BeaconEstimate>,
 ): { primary: KpiTile[]; secondary: KpiTile[] } {
   const recipe = PANELS[kind];
-  const primary = recipe.primary
+  const primaryRecipes = recipe.primary.filter(
+    (r) => !isSuppressedForKind(kind, r.code, byCode),
+  );
+  const secondaryRecipes = recipe.secondary.filter(
+    (r) => !isSuppressedForKind(kind, r.code, byCode),
+  );
+  const primary = primaryRecipes
     .map((r) => buildKpiTile(r, byCode.get(r.code), beacon))
-    .filter((t): t is KpiTile => !!t && (t.valueFormatted != null || recipe.primary.length <= 4));
-  const secondary = recipe.secondary
+    .filter((t): t is KpiTile => !!t && (t.valueFormatted != null || primaryRecipes.length <= 4));
+  const secondary = secondaryRecipes
     .map((r) => buildKpiTile(r, byCode.get(r.code), beacon))
     .filter((t): t is KpiTile => !!t && t.valueFormatted != null);
   return { primary, secondary };
