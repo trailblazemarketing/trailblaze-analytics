@@ -28,7 +28,9 @@ _REGIONS = [
     _m("africa", "Africa", "region"),
     _m("mena", "MENA", "region", aliases=["Middle East and North Africa"]),
     _m("ceeca", "CEECA", "region", aliases=["Central & Eastern Europe / Central Asia"]),
-    _m("nordics", "Nordics", "region", aliases=["Nordic countries"]),
+    _m("nordics", "Nordics", "region", aliases=["Nordic countries", "Nordic"]),
+    _m("western-europe", "Western Europe", "region", aliases=["WE", "W Europe"]),
+    _m("row", "Rest of World", "region", aliases=["RoW", "Rest of the World"]),
 ]
 
 # Countries (parent = region)

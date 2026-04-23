@@ -94,6 +94,14 @@ METRICS: list[dict] = [
     _m("bingo_revenue", "Bingo Revenue", "revenue", "currency"),
     _m("poker_revenue", "Poker Revenue", "revenue", "currency"),
     _m("horseracing_revenue", "Horseracing Revenue", "revenue", "currency"),
+    _m("other_revenue", "Other Revenue", "revenue", "currency",
+       description="Residual revenue line that is neither casino nor sportsbook (e.g. bingo/poker combined, brokerage, ancillary)."),
+
+    # Business-model splits (operator reporting — Pattern 1)
+    _m("b2b_revenue", "B2B Revenue", "revenue", "currency",
+       description="Revenue from business-to-business operations (e.g. licensing platform / sportsbook to other operators)."),
+    _m("b2c_revenue", "B2C Revenue", "revenue", "currency",
+       description="Revenue from business-to-consumer operations (i.e. owned brands)."),
 
     # Valuation
     _m("ev_ebitda_multiple", "EV/EBITDA", "valuation", "ratio"),

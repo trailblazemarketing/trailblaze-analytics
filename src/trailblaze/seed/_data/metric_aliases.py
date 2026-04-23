@@ -34,4 +34,18 @@ METRIC_ALIASES: list[dict] = [
     # Total revenue / revenue
     {"alias_code": "total_revenue", "canonical_code": "revenue",
      "notes": "'Total revenue' is the default meaning of revenue in company-report context."},
+
+    # Sports margin (Pattern 1 fixture labels "Sports Margin" without _pct)
+    {"alias_code": "sports_margin", "canonical_code": "sports_margin_pct",
+     "notes": "Betsson-style label for sportsbook net margin."},
+
+    # Business-model split (Pattern 1) — short variants the LLM sometimes emits
+    {"alias_code": "b2b", "canonical_code": "b2b_revenue",
+     "notes": "Short variant for the B2B revenue split row in operator segment tables."},
+    {"alias_code": "b2c", "canonical_code": "b2c_revenue",
+     "notes": "Short variant for the B2C revenue split row in operator segment tables."},
+
+    # Residual product line (Pattern 1)
+    {"alias_code": "other", "canonical_code": "other_revenue",
+     "notes": "Short variant for the residual-product revenue row ('Other' in Betsson tables)."},
 ]
