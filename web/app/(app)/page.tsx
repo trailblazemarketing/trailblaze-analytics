@@ -320,39 +320,47 @@ export default async function HomePage({
           </div>
 
           <aside className="lg:col-span-3 space-y-3">
-            {/* Top Markets — compact 10-row rail. Re-uses the
-                already-fetched markets.rows (which include
-                country-rollup augmentation, see Panel A merge above). */}
-            <Leaderboard
-              title="Top markets"
-              subtitle="By online GGR (latest)"
-              valueLabel="ONLINE GGR"
-              nameLabel="Country"
-              rows={markets.rows.slice(0, 10)}
-              total={null}
-              columns={["rank", "name", "value", "yoy", "sparkline"]}
-              maxRows={10}
-              showViewAll
-              viewAllHref="/markets"
-            />
-
-            {/* Top Operators — compact 10-row rail. Re-uses the
-                already-fetched entityRaw via the operator sub-tab,
-                falling back to the operator type explicitly so the
-                rail stays operator-focused regardless of which
-                sub-tab is active below. */}
-            <Leaderboard
-              title="Top operators"
-              subtitle="By latest revenue"
-              valueLabel="REVENUE"
-              nameLabel="Entity"
-              rows={entities.rows.slice(0, 10)}
-              total={null}
-              columns={["rank", "name", "value", "yoy", "sparkline"]}
-              maxRows={10}
-              showViewAll
-              viewAllHref="/companies?type=operator"
-            />
+            {/* Right rail — each leaderboard pinned to the same
+                450px height as its left-column counterpart so the
+                world heatmap aligns with Top Markets and the treemap
+                aligns with Top Operators (the QA-reported ragged
+                vertical edge from rails extending past the heatmap
+                bottom). Internal scroll keeps overflow contained
+                within each rail rather than stretching the column. */}
+            <div className="lg:h-[450px] overflow-hidden rounded-md border border-tb-border bg-tb-surface flex flex-col">
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <Leaderboard
+                  title="Top markets"
+                  subtitle="By online GGR (latest)"
+                  valueLabel="ONLINE GGR"
+                  nameLabel="Country"
+                  rows={markets.rows.slice(0, 10)}
+                  total={null}
+                  columns={["rank", "name", "value", "yoy", "sparkline"]}
+                  maxRows={10}
+                  showViewAll
+                  viewAllHref="/markets"
+                  className="border-0 !rounded-none"
+                />
+              </div>
+            </div>
+            <div className="lg:h-[450px] overflow-hidden rounded-md border border-tb-border bg-tb-surface flex flex-col">
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <Leaderboard
+                  title="Top operators"
+                  subtitle="By latest revenue"
+                  valueLabel="REVENUE"
+                  nameLabel="Entity"
+                  rows={entities.rows.slice(0, 10)}
+                  total={null}
+                  columns={["rank", "name", "value", "yoy", "sparkline"]}
+                  maxRows={10}
+                  showViewAll
+                  viewAllHref="/companies?type=operator"
+                  className="border-0 !rounded-none"
+                />
+              </div>
+            </div>
           </aside>
         </div>
 
