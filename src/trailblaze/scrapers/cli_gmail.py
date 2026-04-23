@@ -45,16 +45,31 @@ from trailblaze.scrapers.gmail.ingest import ingest_labeled_emails
          "stale report + metric_values before re-ingesting. Use this after a "
          "renderer or parser change that should be applied retroactively.",
 )
+@click.option(
+    "--retry-errors",
+    is_flag=True,
+    help="Retry messages previously marked 'error' in "
+         "gmail_ingested_messages. Same flow as --reprocess-existing but "
+         "targets the error bucket. Useful after fixing a transient "
+         "environmental failure (API credits, rate limits, etc.) and "
+         "wanting to pick up where a crashed reprocess left off.",
+)
 @click.option("-v", "--verbose", is_flag=True, help="DEBUG-level logging.")
 def main(
     dry_run: bool,
     limit: int | None,
     force: bool,
     reprocess_existing: bool,
+    retry_errors: bool,
     verbose: bool,
 ) -> None:
     """Scrape analyst emails from Gmail and ingest them into the Trailblaze DB."""
     configure_logging(logging.DEBUG if verbose else logging.INFO)
+
+    if reprocess_existing and retry_errors:
+        raise click.UsageError(
+            "--reprocess-existing and --retry-errors are mutually exclusive."
+        )
 
     click.echo(f"Trusted senders: {', '.join(TRUSTED_SENDERS) or '(none)'}")
     if dry_run:
@@ -64,12 +79,18 @@ def main(
             "Running in --reprocess-existing mode; previously-ingested reports "
             "will be rebuilt from Gmail."
         )
+    if retry_errors:
+        click.echo(
+            "Running in --retry-errors mode; messages previously marked "
+            "status='error' will be re-processed."
+        )
 
     summary = ingest_labeled_emails(
         dry_run=dry_run,
         limit=limit,
         force=force,
         reprocess_existing=reprocess_existing,
+        retry_errors=retry_errors,
     )
 
     click.echo("")

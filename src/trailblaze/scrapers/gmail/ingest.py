@@ -156,6 +156,7 @@ def ingest_labeled_emails(
     limit: int | None = None,
     force: bool = False,
     reprocess_existing: bool = False,
+    retry_errors: bool = False,
 ) -> IngestSummary:
     """Process messages for the Gmail ingestion pipeline.
 
@@ -167,6 +168,12 @@ def ingest_labeled_emails(
     old ``reports`` + ``metric_values`` rows and re-renders / re-parses each
     from scratch, so a renderer or parser change can be retroactively
     applied.
+
+    ``retry_errors`` runs the same flow but targets
+    ``gmail_ingested_messages.status='error'``. Those rows typically have
+    ``report_id IS NULL`` already (their previous attempt crashed before
+    the report row landed or their report was deleted in a failed run), so
+    the delete step is a no-op and the flow is effectively a retry.
     """
     SYNTHETIC_PDF_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -180,6 +187,15 @@ def ingest_labeled_emails(
             label_map=label_map,
             dry_run=dry_run,
             limit=limit,
+        )
+
+    if retry_errors:
+        return _reprocess_existing(
+            service=service,
+            label_map=label_map,
+            dry_run=dry_run,
+            limit=limit,
+            statuses=("error",),
         )
 
     message_ids = gclient.list_labeled_messages(
@@ -216,14 +232,21 @@ def _reprocess_existing(
     label_map: dict[str, str],
     dry_run: bool,
     limit: int | None,
+    statuses: tuple[str, ...] = ("ingested",),
 ) -> IngestSummary:
-    """Rerun render + parse against every already-ingested email.
+    """Rerun render + parse against every email in the given gim statuses.
 
     Drives from ``gmail_ingested_messages`` rather than a Gmail label query
-    so the Gmail-side labels (``Trailblaze-Ingested``) don't need flipping.
-    Deletes ``metric_values`` explicitly because their FK to ``reports.id``
-    is ``ON DELETE SET NULL`` — letting them go to NULL would leave orphan
-    rows visible in the UI with no report link.
+    so the Gmail-side labels (``Trailblaze-Ingested`` / ``Trailblaze-Error``)
+    don't need flipping manually. Deletes ``metric_values`` explicitly
+    because their FK to ``reports.id`` is ``ON DELETE SET NULL`` — letting
+    them go to NULL would leave orphan rows visible in the UI with no
+    report link.
+
+    ``statuses`` defaults to ``("ingested",)`` for the standard
+    re-extraction case; pass ``("error",)`` to retry previously-failed
+    messages (no reports to clean up), or an arbitrary tuple to cover
+    multiple buckets.
     """
     with session_scope() as s:
         rows = s.execute(
@@ -231,13 +254,16 @@ def _reprocess_existing(
                 GmailIngestedMessage.message_id,
                 GmailIngestedMessage.report_id,
                 GmailIngestedMessage.subject,
-            ).where(GmailIngestedMessage.status == "ingested")
+            ).where(GmailIngestedMessage.status.in_(statuses))
         ).all()
     if limit is not None:
         rows = rows[:limit]
 
     summary = IngestSummary(found=len(rows))
-    log.info("reprocess_existing: %d previously-ingested messages", summary.found)
+    log.info(
+        "reprocess_existing: %d messages matching status in %s",
+        summary.found, list(statuses),
+    )
 
     if dry_run:
         for r in rows:
@@ -409,10 +435,12 @@ def _process_one(
         )
         return
 
-    # Success — update labels.
+    # Success — update labels. Remove INGEST and ERROR (both may be absent
+    # depending on how this message got into this state); add INGESTED.
     try:
         gclient.add_label(service, message_id, INGESTED_LABEL, label_map)
         gclient.remove_label(service, message_id, INGEST_LABEL, label_map)
+        gclient.remove_label(service, message_id, ERROR_LABEL, label_map)
     except Exception:
         log.exception("%s: label update failed after successful ingest", message_id)
 
