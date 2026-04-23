@@ -131,5 +131,5 @@ def extract(pdf_text: str, classification: ClassificationOutput) -> ExtractionOu
         tool_name="extract_content",
         tool_description="Return all extractable metrics and narratives from this PDF.",
         output_cls=ExtractionOutput,
-        max_tokens=32768,
+        max_tokens=128000,  # Opus 4.7 synchronous Messages API ceiling
     )
