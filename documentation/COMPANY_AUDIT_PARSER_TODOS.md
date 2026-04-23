@@ -452,6 +452,205 @@ frontend fixes this session.
 - Priority: medium (confirmed via screenshot; not yet root-caused)
 - Related Phase 2.5 Unit: A + market data ingest
 
+## Issue 13: US-state currency rows missing unit_multiplier on online_ggr (and friends)
+- What's wrong: every US-state online_ggr row from Q4-25 / Q1-26 carries
+  `unit_multiplier IS NULL` on values that are clearly stored in
+  millions. NJ M2026-03 = 272.1 should be $272.1M; without the
+  multiplier the formatter divides by FX rate and renders €254.40
+  instead of €254.40M. Same pattern surfaced on Geographic Breakdown
+  on /companies/flutter, /companies/allwyn-international,
+  /companies/better-collective, /companies/evolution, BetMGM US.
+- Evidence:
+  ```sql
+  SELECT mk.slug, p.code, mvc.value_numeric, mvc.currency, mvc.unit_multiplier
+  FROM metric_value_canonical mvc
+  JOIN markets mk ON mk.id = mvc.market_id
+  JOIN metrics m ON m.id = mvc.metric_id
+  JOIN periods p ON p.id = mvc.period_id
+  WHERE mk.slug LIKE 'us-%' AND m.code = 'online_ggr' AND mvc.entity_id IS NULL;
+  -- → all rows have unit_multiplier = '' (empty)
+  ```
+- Suggested fix: parser should default `unit_multiplier = 'millions'`
+  for currency metrics when the source line carries a value < 100k —
+  US-state regulator filings nearly always report in $ millions.
+  Frontend has been patched defensively (Fix D in this session, commit
+  8703f12) via `inferUnitMultiplier` + `nativeToEurInferred`; the
+  parser fix is the canonical resolution.
+- Priority: high (Fix D mitigates UI display but the underlying rows
+  still carry the wrong scale, so direct DB queries / CSV exports
+  remain wrong)
+- Related Phase 2.5 Unit: A (recogniser units default)
+
+## Session 6 (2026-04-23, evening) — QA report from Claude-in-Chrome
+
+12 data-layer issues surfaced in a systematic 19-page audit. Frontend
+fixes for the rest of the report shipped as Fix Classes A-R in commits
+4dff860 through 9eca7c5; the items below need backend work.
+
+## Issue 24: Entain market cap = €448.20B (100× scale error)
+- What's wrong: stock card shows Entain market cap at €448B —
+  approximately 100× too high. Real cap is ~€4-5B.
+- Evidence:
+  ```sql
+  SELECT mv.value_numeric, mv.unit_multiplier, mv.currency, p.code
+  FROM metric_values mv
+  JOIN metrics m ON m.id = mv.metric_id
+  JOIN periods p ON p.id = mv.period_id
+  JOIN entities e ON e.id = mv.entity_id
+  WHERE e.slug = 'entain' AND m.code = 'market_cap'
+  ORDER BY p.start_date DESC LIMIT 5;
+  ```
+- Suggested fix: Stock-API ingest path. Probably extracting share
+  count × price without converting share count from "thousands" /
+  "millions" to raw share count. Or extracting market_cap with the
+  wrong unit_multiplier on the source feed.
+- Priority: high (visible on Entain detail page hero)
+- Related Phase 2.5 Unit: stock ingest pipeline (separate from Unit A)
+
+## Issue 25: Flutter Q3-25 revenue €128.6M with -96.4% QoQ, +3036.7% Q4-25
+- What's wrong: Flutter Q3-25 revenue extracted at $128.6M when the
+  real number is ~$3.6B (Q4-25 $3.5B is right). Single-quarter unit
+  collapse → adjacent quarters' QoQ comparisons read as catastrophic
+  swings.
+- Evidence:
+  ```sql
+  SELECT p.code, mv.value_numeric, mv.currency, mv.unit_multiplier, r.filename
+  FROM metric_values mv
+  JOIN metrics m ON m.id = mv.metric_id
+  JOIN periods p ON p.id = mv.period_id
+  JOIN entities e ON e.id = mv.entity_id
+  LEFT JOIN reports r ON r.id = mv.report_id
+  WHERE e.slug = 'flutter' AND m.code = 'revenue'
+    AND p.code = 'Q3-25';
+  ```
+- Suggested fix: post-Fix-A YoY clamp suppresses the percentage at the
+  display layer (commit b6d89ce). Underlying value is still wrong.
+  Same units-default fix as Issue 13 would catch this.
+- Priority: high (figures from a Tier-1 operator must be defensible)
+- Related Phase 2.5 Unit: A
+
+## Issue 26: FanDuel + Flutter Entertainment both at €1.82B / 50% in Flutter US competitive widget
+- What's wrong: parent (Flutter Entertainment) and child (FanDuel)
+  both appear in the Competitive Position widget on the Flutter US
+  market page, each at €1.82B / 50% share — they're the same number
+  double-counted because the parser doesn't respect parent_entity_id
+  hierarchy when surfacing operator competitive views.
+- Suggested fix: leaderboard SQL should exclude either the parent
+  (when its rolled-up value equals a child's value) OR the child
+  (when the parent already aggregates it). Cleanest: walk the
+  parent_entity_id chain and collapse to one canonical operator per
+  market.
+- Priority: medium (widget still readable, but visibly duplicated)
+- Related Phase 2.5 Unit: B (entity hierarchy) + leaderboard SQL
+
+## Issue 27: Sweden competitive widget — Kindred / Betsson / evoke €13.6M total vs €143.7M market
+- What's wrong: Sweden Competitive Position renders at 1/10th the
+  scale of the disclosed market total + omits ATG (the largest
+  Sweden operator). Combination of Issue 13 (units multiplier) and
+  Issue 18 (entity-attributed Sweden online_ggr missing).
+- Suggested fix: see Issues 13 + 18. Fix E ⚠ scale badge from earlier
+  this session now warns analysts at the UI layer.
+- Priority: high (Sweden is a top-5 EU market)
+- Related Phase 2.5 Unit: A + B
+
+## Issue 28: BetMGM NGR €2.43B > Revenue €605.3M; Betsson NGR €1.19B > Revenue €285.0M
+- What's wrong: NGR rendered larger than Revenue. By definition
+  NGR ≤ Revenue (NGR = revenue minus bonus deductions). One side
+  has wrong units.
+- Evidence: BetMGM revenue Q1-26 row vs ngr Q4-25 row — the ngr
+  carries the wrong unit_multiplier or currency. Likely the
+  TopGolf-inclusive parent revenue line was extracted as NGR.
+- Suggested fix: cross-metric sanity check at extraction — if
+  ngr > revenue for the same (entity, period), flag both for review.
+- Priority: high (every margin / take-rate analysis is bogus when
+  the inputs are reversed)
+- Related Phase 2.5 Unit: A (cross-metric sanity)
+
+## Issue 29: Implausible YoYs not fully suppressed
+- What's wrong: QA report flagged Entain H1-25 +65.4%, Catena Media
+  Q4-25 +52.9%, Kaizen +23.5%, Better Collective EBITDA -32.7%,
+  Overview Casino GGR +57.7%, Sportsbook +30.8%. Most are within the
+  ±80% sanity bound (Fix A from polish session) so they pass through.
+  Some genuine, some not.
+- Suggested fix: not all of these are wrong — Catena Media +52.9%
+  could be a real swing. Verify per-row. For UI: consider lowering
+  the clamp to ±50% AND allowing a metric-specific override (e.g.
+  newly-regulated markets). Best handled when Beacon methodology
+  lands.
+- Priority: investigate-only
+- Related Phase 2.5 Unit: A + Beacon
+
+## Issue 30: 153 of 158 reports at parsed_with_warnings status
+- What's wrong: 96.8% of corpus has `parse_status = 'parsed_with_warnings'`.
+  Either the warning bar is too low (everything trips it) or the corpus
+  genuinely has systematic warnings worth investigating.
+- Evidence:
+  ```sql
+  SELECT parse_status, COUNT(*) FROM reports GROUP BY parse_status;
+  ```
+- Suggested fix: dump the warnings on a sample of 10 reports and see
+  what's recurring. If there's a single noisy warning ("missing
+  optional field X"), suppress it. If the warnings are real, fix the
+  recogniser.
+- Priority: investigate-only
+- Related Phase 2.5 Unit: A (parser observability)
+
+## Issue 31: UK "Last 9 quarters" Sportsbook/Casino/NGR rows missing Q3-25 onwards
+- What's wrong: time-matrix on /markets/united-kingdom shows
+  Sportsbook GGR / Casino GGR / NGR rows trailing off after Q2-25.
+  Likely the data exists at the entity scope (per-operator) but no
+  market-scope aggregate landed for those quarters.
+- Suggested fix: market-scope aggregate query — sum of operator
+  values for the period — could fill gaps when no native row exists.
+  Same pattern as country rollup (commit f0a5b33 in this session).
+- Priority: medium
+- Related Phase 2.5 Unit: A or query-layer rollup
+
+## Issue 32: Italy "Last 6 quarters" skips Q2-24 and Q4-24
+- What's wrong: time-matrix on /markets/italy renders Q1-24, Q3-24,
+  Q1-25, Q2-25, Q3-25, Q4-25 — missing Q2-24 and Q4-24 entirely.
+  The cadence picker in commit f6de180 handles consistent quarterly
+  data; sparse quarters fall through.
+- Suggested fix: parser likely failed to extract those specific
+  quarters. Check the Italy AGIMEG monthly aggregate data — if Q2/Q4
+  components exist as Apr+May+Jun / Oct+Nov+Dec months, derive the
+  quarter from the months at the parser layer (Phase 2.5 Unit C).
+- Priority: medium
+- Related Phase 2.5 Unit: A + C
+
+## Issue 33: Kambi Op. Turnover + EBITDA tiles empty on KPI panel
+- What's wrong: Kambi is `b2b_platform`. The b2b_platform PANELS
+  recipe in scorecard-builder includes `turnover` and `ebitda` as
+  primary tiles, but Kambi disclosures use `b2b_revenue` + actual
+  `adjusted_ebitda` instead. Tile labels don't match the metric
+  codes the entity actually emits.
+- Suggested fix: either (a) Kambi recogniser maps to `turnover` /
+  `ebitda` (parser change), or (b) the b2b_platform panel uses
+  `b2b_revenue` and `adjusted_ebitda` codes (frontend change). The
+  PANELS migration belongs to Phase 2.5 Unit D (entity-type-specific
+  panels).
+- Priority: medium
+- Related Phase 2.5 Unit: D
+
+## Issue 34: Allwyn revenue chart only shows FY-25
+- What's wrong: Allwyn's revenue chart on /companies/allwyn-international
+  shows a single point (FY-25). Quarterly lottery breakdowns aren't
+  extracted from the Allwyn quarterly reports. Fix C from session 5
+  (commit 5fe3781) falls back to GGR which has even less coverage.
+- Suggested fix: lottery operators report differently from
+  sportsbook/casino — Phase 2.5 Unit D should add a lottery-specific
+  recogniser that picks up draw-based revenue, instant games, etc.
+- Priority: medium (Allwyn Tier-1 entity for the demo)
+- Related Phase 2.5 Unit: C / D
+
+## Issue 35: Q4-25 data gap across multiple operators
+- Already logged as Issue 21 in session 5; reaffirmed by Q4-25-vs-Q1-26
+  charts on Flutter/BetMGM/Betsson. Unit A reprocess pending.
+
+---
+
+# Session 5 (2026-04-23) — data quality + UI polish pass
+
 ## Issue 23: Overview Beacon™ column shows 0% for every row except Greece (4%)
 - What's wrong: Beacon coverage column in the Top Markets widget
   reports near-zero everywhere. Two explanations: (a) Beacon
