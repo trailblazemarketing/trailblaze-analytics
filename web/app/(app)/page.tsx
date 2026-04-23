@@ -1,8 +1,5 @@
 import Link from "next/link";
 import {
-  listRecentReports,
-} from "@/lib/queries/reports";
-import {
   getEntityLeaderboard,
   getMarketLeaderboard,
 } from "@/lib/queries/analytics";
@@ -12,11 +9,6 @@ import {
 } from "@/lib/queries/periods";
 import { getTickerStrip } from "@/lib/queries/stocks";
 import {
-  getBiggestRevenueGrowers,
-  getMarginExpansionLeaders,
-  getRecentCommentary,
-} from "@/lib/queries/movers";
-import {
   adaptEntityLeaderboardRows,
   adaptMarketLeaderboardRows,
 } from "@/lib/adapters";
@@ -24,17 +16,11 @@ import { query } from "@/lib/db";
 import { Leaderboard } from "@/components/primitives/leaderboard";
 import type { LeaderboardRow } from "@/components/primitives/leaderboard";
 import { TickerStrip } from "@/components/overview/ticker-strip";
-import { MoversRow } from "@/components/overview/movers-row";
 import { HeroTile } from "@/components/overview/hero-tile";
 import { PeriodSelector } from "@/components/layout/period-selector";
-import { Badge } from "@/components/ui/badge";
 import { ReportLink } from "@/components/reports/report-link";
-import { OperatorsSubTabs } from "./operators-sub-tabs";
-import { formatDate, formatEur } from "@/lib/format";
-import { displayReportFilename } from "@/lib/formatters/reportFilename";
-import type { Report } from "@/lib/types";
+import { formatEur } from "@/lib/format";
 import { getCountryRollupValues } from "@/lib/queries/markets";
-import { MarketBarChart } from "@/components/charts/market-bar";
 import {
   countCanonicalEntities,
   countTrackedMarkets,
@@ -56,32 +42,19 @@ const WORLD_TOPOJSON_URL =
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// Which entity-type code each sub-tab of Panel C maps to
-const SUB_TABS = [
-  { code: "operator", label: "Operators", metric: "revenue" },
-  { code: "affiliate", label: "Affiliates", metric: "revenue" },
-  { code: "b2b_platform", label: "B2B", metric: "revenue" },
-] as const;
-
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: { sub?: string; period?: string };
+  searchParams: { period?: string };
 }) {
-  const sub =
-    SUB_TABS.find((s) => s.code === searchParams.sub) ?? SUB_TABS[0];
   const periodCode = searchParams.period ?? null;
 
   const [
     marketRaw,
     entityRaw,
-    recentReports,
     ticker,
     dataDrops,
     populatedPeriods,
-    growers,
-    marginLeaders,
-    commentary,
     countryRollup,
     heroEntities,
     heroMarkets,
@@ -90,30 +63,25 @@ export default async function HomePage({
     heroCasinoGgr,
     heroSportsbookGgr,
   ] = await Promise.all([
-    // M2: default back to online_ggr — primary Markets KPI per UI_SPEC_2 Panel 7.
-    // Country scope + rollup (M4) augments coverage for US / Canada from
-    // sub-market data. Raw-country-row shortage is explicit in the helper text.
+    // Top Markets right-rail data — country-scope online_ggr leaderboard
+    // augmented below with country-rollups for US / Canada whose native
+    // country row has no online_ggr entry.
     getMarketLeaderboard({
       metricCode: "online_ggr",
       periodCode,
       limit: 15,
       marketType: "country",
     }),
+    // Top Operators right-rail data.
     getEntityLeaderboard({
-      metricCode: sub.metric,
-      entityTypeCode: sub.code,
+      metricCode: "revenue",
+      entityTypeCode: "operator",
       periodCode,
       limit: 15,
     }),
-    listRecentReports(7),
     getTickerStrip(15),
     getDataDrops(6),
     listPopulatedPeriods(),
-    getBiggestRevenueGrowers(6),
-    getMarginExpansionLeaders(6),
-    getRecentCommentary(5),
-    // O1 + M4: country-rollup companion — sum-of-children used to augment the
-    // markets leaderboard for countries without a native online_ggr row.
     getCountryRollupValues({ metricCode: "online_ggr" }),
     // Hero band aggregates — counts + EUR-converted sums across the
     // canonical entity / country-market sets. YoY computed cadence-matched
@@ -203,15 +171,6 @@ export default async function HomePage({
     markets.rows = merged;
     if (markets.total) markets.total.valueFormatted = formatEur(denom);
   }
-  // O1: bar-chart data — top 10 of the merged markets list
-  const chartPoints = markets.rows
-    .filter((r) => r.value != null)
-    .slice(0, 10)
-    .map((r) => ({
-      name: r.name,
-      value: r.value as number,
-      isRollup: r.isRollup ?? false,
-    }));
   const entities = adaptEntityLeaderboardRows(entityRaw);
 
   return (
@@ -377,169 +336,12 @@ export default async function HomePage({
           <DataDropsCard drops={dataDrops} />
           <BiggestMoversCard rows={moverRows} />
         </div>
-
-        {/* Panel A + B: Markets leaderboard (2/3) · Right column stacked (1/3)
-            items-start: each panel takes its natural content height. Without
-            this, the grid forces panels to match the tallest column, leaving
-            an empty band below the leaderboard's TOTAL row before "View all". */}
-        <div className="grid items-start gap-3 lg:grid-cols-3">
-          <Leaderboard
-            className="lg:col-span-2"
-            title="Markets"
-            subtitle="Top countries by online GGR (latest period · country-rollup)"
-            valueLabel="ONLINE GGR"
-            nameLabel="Market"
-            rows={markets.rows}
-            total={markets.total}
-            columns={[
-              "rank",
-              "name",
-              "value",
-              "share",
-              "yoy",
-              "sparkline",
-              "beacon_coverage",
-            ]}
-            maxRows={12}
-            showViewAll
-            viewAllHref="/markets"
-          />
-
-          {/* Right column: Recent reports stacked with Data drops (O1) */}
-          <div className="space-y-3">
-            <RecentReportsCard reports={recentReports} />
-            <DataDropsCard drops={dataDrops} />
-          </div>
-        </div>
-
-        {/* O1 (T2 polish 3): Global iGaming GGR bar chart — top 10 countries
-            by Online GGR. Includes country-rollups (Σ) so US / Canada appear
-            even when their native country row has no online_ggr entry. */}
-        {chartPoints.length > 0 && (
-          <div className="rounded-md border border-tb-border bg-tb-surface">
-            <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
-              <div>
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-                  Global iGaming — top markets by Online GGR
-                </h3>
-                <p className="mt-0.5 text-[10px] text-tb-muted">
-                  Top {chartPoints.length} countries · latest reported period ·
-                  Σ indicates rolled-up from sub-markets
-                </p>
-              </div>
-              <span className="font-mono text-[10px] text-tb-muted">EUR</span>
-            </div>
-            <div className="p-2">
-              <MarketBarChart
-                data={chartPoints}
-                valueLabel="ONLINE GGR"
-                height={Math.max(220, chartPoints.length * 24 + 40)}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Panel C: Operators / Affiliates / B2B leaderboard */}
-        <div>
-          <OperatorsSubTabs active={sub.code} />
-          <Leaderboard
-            title={`${sub.label} leaderboard`}
-            subtitle={`Top ${sub.label.toLowerCase()} by most recent ${sub.metric}`}
-            valueLabel={sub.metric.toUpperCase()}
-            rows={entities.rows}
-            total={entities.total}
-            columns={[
-              "rank",
-              "name",
-              "value",
-              "share",
-              "yoy",
-              "sparkline",
-              "ticker",
-            ]}
-            maxRows={12}
-            showViewAll
-            viewAllHref={`/companies?type=${sub.code}`}
-          />
-        </div>
-
-        {/* Panel D: Revenue growers · Margin leaders · Recent commentary (O2) */}
-        <MoversRow
-          growers={growers}
-          marginLeaders={marginLeaders}
-          commentary={commentary}
-        />
       </div>
     </div>
   );
 }
 
-// Recent reports compact list — 7 rows, tighter density.
-function RecentReportsCard({
-  reports,
-}: {
-  reports: (Report & {
-    entity_names: string[] | null;
-    market_names: string[] | null;
-  })[];
-}) {
-  return (
-    <div className="rounded-md border border-tb-border bg-tb-surface">
-      <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-          Recent reports
-        </h3>
-        <Link
-          href="/reports"
-          className="text-[10px] text-tb-blue hover:underline"
-        >
-          View all →
-        </Link>
-      </div>
-      <ul className="divide-y divide-tb-border/60">
-        {reports.length === 0 && (
-          <li className="p-3 text-[11px] text-tb-muted">No reports yet.</li>
-        )}
-        {reports.map((r) => {
-          const subjects: string[] = [
-            ...(r.entity_names ?? []).slice(0, 2),
-            ...(r.market_names ?? []).slice(0, 2),
-          ];
-          return (
-            <li
-              key={r.id}
-              className="px-3 py-1.5 transition-colors hover:bg-tb-border/25"
-            >
-              <ReportLink
-                reportId={r.id}
-                className="block w-full text-left"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-[11px] font-medium text-tb-text">
-                    {displayReportFilename(r.filename)}
-                  </span>
-                  <span className="shrink-0 font-mono text-[9px] text-tb-muted">
-                    {formatDate(r.published_timestamp)}
-                  </span>
-                </div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-tb-muted">
-                  <Badge variant="muted">{r.document_type}</Badge>
-                  {subjects.length > 0 && (
-                    <span className="truncate">
-                      {subjects.slice(0, 3).join(" · ")}
-                    </span>
-                  )}
-                </div>
-              </ReportLink>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-// O1 — DATA DROPS. Synthesized from most recent activity across pipelines
+// DATA DROPS — synthesised from most recent activity across pipelines
 // (no dedicated activity_log table exists). One row per pipeline event,
 // newest first. Green dot = last 24h, grey = older.
 type DataDropRow = {
