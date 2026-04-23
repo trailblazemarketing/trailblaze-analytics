@@ -41,8 +41,15 @@ import {
   sumLatestPerEntity,
   sumLatestPerMarket,
   topEntitiesByRevenue,
+  countryMapPoints,
 } from "@/lib/queries/overview";
 import { CompaniesTreemap } from "@/components/overview/companies-treemap";
+import { WorldHeatmap } from "@/components/overview/world-heatmap";
+
+// Source for the world country boundaries used by the heatmap. Hosted
+// on jsDelivr; ~80KB. Keeps the topojson out of the npm bundle.
+const WORLD_TOPOJSON_URL =
+  "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -118,9 +125,6 @@ export default async function HomePage({
   ]);
 
   // Companies treemap data — top 30 canonical entities by revenue.
-  // Skipped if the hero TotalRev tile would have lit up the same set
-  // (always true here; we still query separately to keep the shape
-  // dedicated to the treemap render).
   const treemapEntities = await topEntitiesByRevenue(30);
   const treemapData = treemapEntities
     .filter((e) => e.revenueEur > 0)
@@ -130,6 +134,21 @@ export default async function HomePage({
       size: e.revenueEur,
       entityType: e.entityType,
       yoyPct: e.yoyPct,
+    }));
+  // World heatmap — country-scope online_ggr per market with YoY +
+  // operator counts. Filtered to rows with a usable iso_country (the
+  // map keys by ISO numeric → alpha-2; markets without alpha-2 codes
+  // can't be coloured).
+  const mapPoints = (await countryMapPoints())
+    .filter((p) => p.isoCountry)
+    .map((p) => ({
+      iso2: p.isoCountry as string,
+      slug: p.slug,
+      name: p.name,
+      onlineGgrEur: p.onlineGgrEur,
+      yoyPct: p.yoyPct,
+      operatorCount: p.operatorCount,
+      latestPeriodCode: p.latestPeriodCode,
     }));
 
   // Compute hero YoYs only when both sides are present and within bounds
@@ -246,33 +265,76 @@ export default async function HomePage({
           />
         </div>
 
-        {/* Companies treemap — top 30 canonical entities by latest
-            revenue, EUR-converted. Cell size = revenue, colour =
-            entity type (operator=blue, b2b_*=cyan, affiliate=teal,
-            lottery=amber, dfs=purple). Click navigates to the
-            company detail page. */}
-        {treemapData.length > 0 && (
-          <div className="rounded-md border border-tb-border bg-tb-surface">
-            <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
-              <div>
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
-                  Companies — top {treemapData.length} by revenue
-                </h3>
-                <p className="mt-0.5 text-[10px] text-tb-muted">
-                  Cell size = latest revenue · colour = entity type · click to drill in
-                </p>
+        {/* Main visuals row — 70/30 grid. LEFT 70%: world heatmap
+            (top, online_ggr by country) + companies treemap (bottom,
+            top 30 entities by revenue). RIGHT 30%: persistent rail
+            (Top Markets + Top Operators) — landing in the next
+            commit; for now this side reuses the existing Markets
+            leaderboard composition below. */}
+        <div className="grid items-start gap-3 lg:grid-cols-10">
+          <div className="space-y-3 lg:col-span-7">
+            {/* World heatmap — countries shaded by latest online_ggr.
+                Hover for tooltip, click opens the market in a new tab. */}
+            {mapPoints.length > 0 && (
+              <div className="rounded-md border border-tb-border bg-tb-surface">
+                <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+                  <div>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                      Online GGR by country
+                    </h3>
+                    <p className="mt-0.5 text-[10px] text-tb-muted">
+                      {mapPoints.length} countries · cyan gradient is
+                      log-scaled (dark = low, bright = high) · hover for
+                      values · click to drill in
+                    </p>
+                  </div>
+                  <span className="font-mono text-[10px] text-tb-muted">EUR</span>
+                </div>
+                <WorldHeatmap
+                  geoUrl={WORLD_TOPOJSON_URL}
+                  countries={mapPoints}
+                  height={450}
+                />
               </div>
-              <div className="flex items-center gap-3 font-mono text-[9px] text-tb-muted">
-                <LegendDot color="#00b4d8" label="operator" />
-                <LegendDot color="#4cc9f0" label="b2b" />
-                <LegendDot color="#2ec4b6" label="affiliate" />
-                <LegendDot color="#ffb703" label="lottery" />
-                <LegendDot color="#7209b7" label="dfs" />
+            )}
+
+            {/* Companies treemap */}
+            {treemapData.length > 0 && (
+              <div className="rounded-md border border-tb-border bg-tb-surface">
+                <div className="flex items-center justify-between border-b border-tb-border px-3 py-2">
+                  <div>
+                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-tb-text">
+                      Companies — top {treemapData.length} by revenue
+                    </h3>
+                    <p className="mt-0.5 text-[10px] text-tb-muted">
+                      Cell size = latest revenue · colour = entity type · click to drill in
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 font-mono text-[9px] text-tb-muted">
+                    <LegendDot color="#00b4d8" label="operator" />
+                    <LegendDot color="#4cc9f0" label="b2b" />
+                    <LegendDot color="#2ec4b6" label="affiliate" />
+                    <LegendDot color="#ffb703" label="lottery" />
+                    <LegendDot color="#7209b7" label="dfs" />
+                  </div>
+                </div>
+                <CompaniesTreemap data={treemapData} height={450} />
               </div>
-            </div>
-            <CompaniesTreemap data={treemapData} height={450} />
+            )}
           </div>
-        )}
+
+          <aside className="lg:col-span-3 space-y-3">
+            {/* Right rail placeholder — populated with Top Markets +
+                Top Operators in the next commit. Inline note keeps
+                this slot reserved without leaving the column visually
+                empty during the staged rollout. */}
+            <div className="rounded-md border border-dashed border-tb-border/60 bg-tb-surface/40 p-4 text-[10px] text-tb-muted">
+              Right rail — Top Markets + Top Operators land in the next
+              commit. The full leaderboard composition continues below
+              for now.
+            </div>
+          </aside>
+        </div>
 
         {/* Panel A + B: Markets leaderboard (2/3) · Right column stacked (1/3)
             items-start: each panel takes its natural content height. Without
