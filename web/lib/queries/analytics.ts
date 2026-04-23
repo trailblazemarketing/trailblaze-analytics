@@ -528,6 +528,97 @@ export function nativeToEur(
   return raw / r;
 }
 
+// Derive an LTM row by summing the 4 most-recent consecutive quarter
+// rows. Returns null when fewer than 4 quarters exist, when they
+// aren't strictly consecutive (~90-day gaps), or when any value can't
+// be EUR-converted. Used to give "(LTM)"-labelled tiles or aggregate
+// headline tiles a real LTM value rather than picking a single quarter.
+export function deriveLtmFromTrailingQuarters(
+  rows: CanonicalRow[],
+): CanonicalRow | null {
+  const quarters = rows
+    .filter((r) => r.period_type === "quarter")
+    .sort((a, b) => b.period_start.localeCompare(a.period_start));
+  if (quarters.length < 4) return null;
+  const last4 = quarters.slice(0, 4);
+  for (let i = 0; i < 3; i++) {
+    const dayGap =
+      (new Date(last4[i].period_start).getTime() -
+        new Date(last4[i + 1].period_start).getTime()) /
+      86_400_000;
+    if (dayGap > 100 || dayGap < 80) return null;
+  }
+  let sumEur = 0;
+  for (const q of last4) {
+    const eur = nativeToEur(q.value_numeric, q.unit_multiplier, q.eur_rate);
+    if (eur == null) return null;
+    sumEur += eur;
+  }
+  const latest = last4[0];
+  return {
+    ...latest,
+    metric_value_id: `derived:ltm:${latest.metric_code}:${latest.period_code}`,
+    period_id: "derived",
+    period_code: `LTM-${latest.period_code}`,
+    period_display_name: `LTM ${latest.period_code}`,
+    period_type: "ltm",
+    value_numeric: String(sumEur),
+    unit_multiplier: "units",
+    currency: "EUR",
+    eur_rate: "1",
+    disclosure_status: "derived",
+  };
+}
+
+// For currency-aggregate KPI tiles (revenue, NGR, GGR, EBITDA etc.):
+// promote a real "total" to the headline rather than letting the latest
+// single-quarter row mislabel itself as Total Revenue. Preference order:
+//   1. An actual `ltm`-period row (sorted by start_date desc)
+//   2. A derived LTM from 4 trailing consecutive quarters
+//   3. A `full_year` row whose start_date is within ~12 months of the
+//      latest quarter (so we don't surface a year-stale FY when fresh
+//      quarters exist for the next year)
+//   4. Leave rows unchanged — the existing "latest by start_date" pick
+//      stands
+//
+// Mirrors the spec from commit 8b106a6 (Markets Online GGR LTM) but
+// generalised for any currency aggregate. Non-currency series (active
+// users, FTDs, ratios) pass through untouched — those tiles legitimately
+// represent point-in-time / latest-period values.
+export function preferAggregateForCurrencyTile(
+  rows: CanonicalRow[],
+): CanonicalRow[] {
+  if (rows.length === 0) return rows;
+  if (rows[0].metric_unit_type !== "currency") return rows;
+  const hasLtm = rows.some((r) => r.period_type === "ltm");
+  if (hasLtm) {
+    const ltm = [...rows]
+      .filter((r) => r.period_type === "ltm")
+      .sort((a, b) => b.period_start.localeCompare(a.period_start))[0];
+    if (ltm) return [ltm, ...rows.filter((r) => r !== ltm)];
+  }
+  const derived = deriveLtmFromTrailingQuarters(rows);
+  if (derived) return [derived, ...rows];
+  const fullYears = [...rows]
+    .filter((r) => r.period_type === "full_year")
+    .sort((a, b) => b.period_start.localeCompare(a.period_start));
+  const quarters = [...rows]
+    .filter((r) => r.period_type === "quarter")
+    .sort((a, b) => b.period_start.localeCompare(a.period_start));
+  if (fullYears.length > 0 && quarters.length > 0) {
+    const latestFy = fullYears[0];
+    const latestQ = quarters[0];
+    const monthsApart =
+      (new Date(latestQ.period_start).getTime() -
+        new Date(latestFy.period_start).getTime()) /
+      (30 * 86_400_000);
+    if (monthsApart >= -1 && monthsApart <= 12) {
+      return [latestFy, ...rows.filter((r) => r !== latestFy)];
+    }
+  }
+  return rows;
+}
+
 // Gated YoY: requires apples-to-apples comparison and bounded result.
 // Returns null when any precondition fails — the UI then shows em-dash.
 //

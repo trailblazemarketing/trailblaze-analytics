@@ -11,6 +11,7 @@ import {
   getEntityLeaderboard,
   nativeToEur,
   toRawNumeric,
+  preferAggregateForCurrencyTile,
 } from "@/lib/queries/analytics";
 import {
   listPopulatedPeriods,
@@ -218,6 +219,22 @@ export default async function CompanyDetailPage({
   // disclosed values are missing but ebitda + revenue both exist. All
   // downstream consumers (primary tile, quarterly table) read through this.
   const byCodeAug = augmentDerivedEbitdaMargin(byCode);
+
+  // CD-AGG: For each currency-aggregate series feeding a KPI tile,
+  // promote a real "total" (LTM > derived 4-quarter LTM > current-year
+  // FY) to the headline rather than letting the latest single-quarter
+  // row mislabel itself as Total Revenue / Total NGR / etc. Generalises
+  // the markets-page LTM fix (commit 8b106a6) to every currency tile on
+  // the company panel. Non-currency series (active users, FTDs, ratios)
+  // pass through untouched.
+  const aggCodes = new Set<string>();
+  for (const r of [...panel.primary, ...panel.secondary]) aggCodes.add(r.code);
+  for (const code of aggCodes) {
+    const rs = byCodeAug.get(code);
+    if (!rs || rs.length === 0) continue;
+    const promoted = preferAggregateForCurrencyTile(rs);
+    if (promoted !== rs) byCodeAug.set(code, promoted);
+  }
 
   const allBeaconIds: string[] = [];
   byCodeAug.forEach((rows) => {
