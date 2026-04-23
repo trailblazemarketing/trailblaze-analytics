@@ -37,6 +37,7 @@ const GATED_PREFIXES = [
   "/companies",
   "/markets",
   "/operators",
+  "/affiliates",
   "/reports",
   "/methodology",
 ];
