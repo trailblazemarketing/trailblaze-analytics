@@ -30,6 +30,11 @@ export type LeaderboardRow = {
   // whose market has children — renders a chevron next to the name.
   hasChildren?: boolean;
   isRollup?: boolean;
+  // Short period label for the row's value ("Nov 2025" / "Q3 2025" /
+  // "LTM Q1 2026"). Round 9 flagged /markets index period-mixing —
+  // Sweden single-month next to UK LTM on the same leaderboard —
+  // which renders invisibly without per-row period tags.
+  period?: string | null;
 };
 
 export type LeaderboardColumn =
@@ -252,6 +257,14 @@ export function Leaderboard({
                           title="Has sub-markets — click to drill in"
                         >
                           ›
+                        </span>
+                      )}
+                      {row.period && (
+                        <span
+                          className="font-mono text-[9px] text-tb-muted"
+                          title={`Value period: ${row.period}`}
+                        >
+                          · {row.period}
                         </span>
                       )}
                       {row.isRollup && (

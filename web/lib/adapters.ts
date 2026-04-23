@@ -276,6 +276,12 @@ export function adaptMarketLeaderboardRows(
       beaconCoveragePct:
         r.beacon_coverage_pct != null ? Number(r.beacon_coverage_pct) : null,
       extra: r.operator_count > 0 ? `${r.operator_count} ops` : undefined,
+      // Surface the period that this row's value is sourced from so
+      // /markets index doesn't silently mix Sweden's monthly figure
+      // with UK's LTM in the same sorted table (round 9 flag). The
+      // period_code ("Nov-25", "LTM-Q1-26", etc.) is short enough to
+      // render inline next to the name without stealing the layout.
+      period: r.latest_period ?? null,
     };
   });
   const total =
