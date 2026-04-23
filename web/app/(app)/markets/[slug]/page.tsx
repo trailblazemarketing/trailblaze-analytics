@@ -359,38 +359,42 @@ export default async function MarketDetailPage({
     }
   }
 
-  // Total GGR vs Online GGR: when the upstream `ggr` series carries the
-  // same EUR-converted value as `online_ggr` for the same period, the
-  // source only disclosed online (no retail/land-based component) and
-  // showing both tiles with identical numbers is misleading. Suppress
-  // the Total GGR tile so it renders em-dash rather than implying a
-  // distinct total. Comparison uses latest period of each series; rows
-  // arrive sorted DESC by start_date.
-  const ggrRows = byCode.get("ggr") ?? [];
-  const onlineGgrRows = byCode.get("online_ggr") ?? [];
-  if (ggrRows.length > 0 && onlineGgrRows.length > 0) {
-    const ggrLatest = ggrRows[0];
-    const onlineGgrForPeriod = onlineGgrRows.find(
-      (r) => r.period_code === ggrLatest.period_code,
+  // Per-pair em-dash collision suppression. When two tiles would
+  // display the same EUR value for the same period, the source either
+  // only disclosed one of them and the parser cloned it (Italy NGR ==
+  // Online NGR €1.45B) or the two metrics are aliases (UK Sportsbook
+  // Handle == Sports Turnover). Pairs are ordered (suppress, keep):
+  // the second of each pair is the canonical surviving tile.
+  const MARKET_DEDUP_PAIRS: [string, string][] = [
+    ["ggr", "online_ggr"],
+    ["ngr", "online_ngr"],
+    ["sportsbook_turnover", "sportsbook_handle"],
+  ];
+  for (const [suppressCode, keepCode] of MARKET_DEDUP_PAIRS) {
+    const suppressRows = byCode.get(suppressCode) ?? [];
+    const keepRows = byCode.get(keepCode) ?? [];
+    if (suppressRows.length === 0 || keepRows.length === 0) continue;
+    const suppressLatest = suppressRows[0];
+    const keepMatch = keepRows.find(
+      (r) => r.period_code === suppressLatest.period_code,
     );
-    if (onlineGgrForPeriod) {
-      const ggrEur = nativeToEur(
-        ggrLatest.value_numeric,
-        ggrLatest.unit_multiplier,
-        ggrLatest.eur_rate,
-      );
-      const onlineGgrEur = nativeToEur(
-        onlineGgrForPeriod.value_numeric,
-        onlineGgrForPeriod.unit_multiplier,
-        onlineGgrForPeriod.eur_rate,
-      );
-      if (
-        ggrEur != null &&
-        onlineGgrEur != null &&
-        Math.abs(ggrEur - onlineGgrEur) / Math.max(Math.abs(ggrEur), 1) < 0.01
-      ) {
-        byCode.set("ggr", []);
-      }
+    if (!keepMatch) continue;
+    const suppressEur = nativeToEur(
+      suppressLatest.value_numeric,
+      suppressLatest.unit_multiplier,
+      suppressLatest.eur_rate,
+    );
+    const keepEur = nativeToEur(
+      keepMatch.value_numeric,
+      keepMatch.unit_multiplier,
+      keepMatch.eur_rate,
+    );
+    if (
+      suppressEur != null &&
+      keepEur != null &&
+      Math.abs(suppressEur - keepEur) / Math.max(Math.abs(suppressEur), 1) < 0.01
+    ) {
+      byCode.set(suppressCode, []);
     }
   }
 

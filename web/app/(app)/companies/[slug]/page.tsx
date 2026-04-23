@@ -259,15 +259,24 @@ export default async function CompanyDetailPage({
   }
 
   // CD-DEDUP: When an aggregate tile's headline EUR value is within 1%
-  // of its online-only counterpart for the same period, the source only
-  // disclosed online and the parser likely cloned it into the aggregate
-  // metric (NGR ≈ Online NGR, Revenue ≈ Online Revenue, GGR ≈ Online
-  // GGR). Showing both tiles with identical numbers misleads — suppress
-  // the aggregate (em-dash). Mirror of markets-page commit dd077df.
+  // of its online-only counterpart (or its sibling alias) for the same
+  // period, the source only disclosed one of them and the parser
+  // likely cloned the value into the alias metric. Showing both tiles
+  // with identical numbers misleads — suppress the secondary tile
+  // (em-dash). The pair list covers:
+  //   - aggregate vs online sibling (Total vs Online of GGR/NGR/Revenue)
+  //   - revenue vs ngr (PrizePicks-class collision where parser maps
+  //     the same disclosed line to both metrics)
+  // Pairs are ordered (suppress, keep): the second of each pair is the
+  // canonical surviving tile.
   const TOTAL_VS_ONLINE_PAIRS: [string, string][] = [
     ["revenue", "online_revenue"],
     ["ngr", "online_ngr"],
     ["ggr", "online_ggr"],
+    // PrizePicks-class: when revenue == ngr (no bonus deductions
+    // disclosed), keep the more-recognised "revenue" tile; suppress
+    // the redundant ngr tile.
+    ["ngr", "revenue"],
   ];
   for (const [totalCode, onlineCode] of TOTAL_VS_ONLINE_PAIRS) {
     const totalRows = byCodeAug.get(totalCode) ?? [];
