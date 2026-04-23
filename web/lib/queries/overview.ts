@@ -266,6 +266,15 @@ export async function topEntitiesByRevenue(limit = 30): Promise<TreemapEntity[]>
      FROM latest
      JOIN entities e ON e.id = latest.entity_id
      LEFT JOIN prev ON prev.entity_id = latest.entity_id
+     -- Parent-child dedup: hide children whose parent entity also has a
+     -- revenue row landing in this result set. Flutter reports group
+     -- revenue that already includes FanDuel (its US subsidiary), so
+     -- showing both double-counts the same dollars in the treemap. When
+     -- parent_entity_id is set AND the parent has its own latest-revenue
+     -- row, keep only the parent. Entities with NULL parent, or whose
+     -- parent has no revenue coverage, always render.
+     WHERE e.parent_entity_id IS NULL
+        OR NOT EXISTS (SELECT 1 FROM latest p WHERE p.entity_id = e.parent_entity_id)
      ORDER BY ((latest.value_numeric / NULLIF(latest.eur_rate, 0)) *
                CASE latest.unit_multiplier
                  WHEN 'billions' THEN 1000000000
