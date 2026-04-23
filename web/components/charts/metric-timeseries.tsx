@@ -69,6 +69,20 @@ export function MetricTimeseries({
           tick={{ fill: "var(--tb-text-muted)", fontSize: 10, fontFamily: "JetBrains Mono" }}
           axisLine={{ stroke: "var(--tb-border)" }}
           tickLine={false}
+          // Suppress synthesised gap-row labels — fillCadenceGaps in
+          // lib/queries/analytics inserts placeholder periods named
+          // "gap-N" so the line breaks visibly at missing periods
+          // (Recharts connectNulls={false}). The placeholder kept its
+          // literal name in the x-axis tick — Flutter / BetMGM /
+          // Betsson / Better Collective charts all rendered the
+          // string "gap-0" between data points. Format ticks: empty
+          // string for any gap label.
+          tickFormatter={(t: unknown) => {
+            const s = typeof t === "string" ? t : String(t ?? "");
+            return s.startsWith("gap-") ? "" : s;
+          }}
+          // Tooltip cursor likewise needs to skip gap rows so hover
+          // doesn't show a tooltip at a synthetic period.
         />
         <YAxis
           tick={{ fill: "var(--tb-text-muted)", fontSize: 10, fontFamily: "JetBrains Mono" }}
@@ -101,10 +115,21 @@ export function MetricTimeseries({
             color: "var(--tb-text)",
           }}
           cursor={{ stroke: "var(--tb-blue)", strokeOpacity: 0.3 }}
+          // Same gap-row guard as the x-axis tick formatter: when the
+          // hovered row is a synthesised "gap-N" placeholder, drop the
+          // label so the tooltip doesn't show the literal string.
+          labelFormatter={(label: unknown) => {
+            const s = typeof label === "string" ? label : String(label ?? "");
+            return s.startsWith("gap-") ? "" : s;
+          }}
           formatter={(value: unknown, name: string, payload) => {
             const key = (payload as { dataKey?: string })?.dataKey;
             const periodCode = (payload as { payload?: { period: string } })
               ?.payload?.period;
+            // Drop the row entry entirely when it's a gap placeholder.
+            if (typeof periodCode === "string" && periodCode.startsWith("gap-")) {
+              return ["", ""];
+            }
             const isBeacon =
               key && periodCode && beaconFlags?.[key]?.has(periodCode);
             return [
