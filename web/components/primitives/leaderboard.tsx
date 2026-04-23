@@ -86,9 +86,23 @@ export function Leaderboard({
   extraHeader?: React.ReactNode;
   forceBeaconColumn?: boolean; // G3: keep beacon_coverage visible even when all-zero
 }) {
+  // Bucket-row detection: entities named "Other" / "Others" / "Other
+  // Proprietary Brands" / "Rest of market" etc. are aggregate buckets,
+  // not real operators. Sort them to the bottom regardless of value
+  // rank, then style the row muted+italic so analysts can tell it
+  // apart from a named entity at a glance.
+  const isBucketRow = (r: LeaderboardRow): boolean =>
+    /^(other|others|rest\s+of)\b/i.test(r.name);
+  const sortedRows = [...rows].sort((a, b) => {
+    const aBucket = isBucketRow(a);
+    const bBucket = isBucketRow(b);
+    if (aBucket && !bBucket) return 1;
+    if (!aBucket && bBucket) return -1;
+    return 0; // preserve incoming rank within group
+  });
   const maxShare =
-    rows.reduce((m, r) => Math.max(m, r.share ?? 0), 0) || 100;
-  const visible = maxRows ? rows.slice(0, maxRows) : rows;
+    sortedRows.reduce((m, r) => Math.max(m, r.share ?? 0), 0) || 100;
+  const visible = maxRows ? sortedRows.slice(0, maxRows) : sortedRows;
 
   // G3: auto-hide beacon_coverage when every visible row reports 0 (or null).
   // Keeps the architecture — caller passes `forceBeaconColumn` on surfaces
@@ -183,23 +197,30 @@ export function Leaderboard({
                 </td>
               </tr>
             )}
-            {visible.map((row, i) => (
+            {visible.map((row, i) => {
+              const bucket = isBucketRow(row);
+              return (
               <tr
                 key={row.id}
-                className="group transition-colors hover:bg-tb-border/25"
+                className={cn(
+                  "group transition-colors hover:bg-tb-border/25",
+                  bucket && "italic text-tb-muted",
+                )}
               >
                 {effectiveColumns.includes("rank") && (
                   <td className="px-3 py-1 font-mono text-[11px] text-tb-muted">
-                    {i + 1}
+                    {bucket ? "—" : i + 1}
                   </td>
                 )}
                 {effectiveColumns.includes("name") && (
                   <td className="max-w-[260px] px-3 py-1">
                     <div className="flex items-center gap-2">
-                      {row.typeChip && (
+                      {/* Bucket rows skip the entity-type chip — they
+                          aren't real entities so the chip would mislead. */}
+                      {row.typeChip && !bucket && (
                         <EntityTypeChip code={row.typeChip} />
                       )}
-                      {row.href ? (
+                      {row.href && !bucket ? (
                         <Link
                           href={row.href}
                           className="truncate text-tb-text hover:text-tb-blue"
@@ -207,7 +228,14 @@ export function Leaderboard({
                           {row.name}
                         </Link>
                       ) : (
-                        <span className="truncate">{row.name}</span>
+                        <span
+                          className={cn(
+                            "truncate",
+                            bucket && "italic text-tb-muted",
+                          )}
+                        >
+                          {row.name}
+                        </span>
                       )}
                       {row.hasChildren && (
                         <span
@@ -325,7 +353,8 @@ export function Leaderboard({
                   </td>
                 )}
               </tr>
-            ))}
+              );
+            })}
             {total && (
               <tr className="border-t-2 border-tb-border bg-tb-bg/40">
                 <td
