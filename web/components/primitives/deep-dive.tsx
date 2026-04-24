@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { SourceLabel } from "@/components/beacon/source-label";
 import { DeltaChip } from "@/components/beacon/delta-chip";
 import { ReportLink } from "@/components/reports/report-link";
+import { useNarrative } from "@/lib/hooks/use-narrative";
 import type {
   BeaconEstimate,
   DisclosureStatus,
@@ -57,6 +58,8 @@ export function DeepDive({
   sourceReports = [],
   beaconByPeriod = {},
   onComparisonAdd,
+  entitySlug,
+  metricCode,
   className,
 }: {
   title: string;
@@ -69,6 +72,11 @@ export function DeepDive({
   // series on the chart. When handler is provided, renders the action
   // button in the header. When omitted, header stays clean.
   onComparisonAdd?: () => void;
+  // Fix H — when both are provided, chart-point hover fetches the
+  // per-period narrative from /api/narratives and appends it to the
+  // tooltip. Omit to keep the tooltip strictly value+period.
+  entitySlug?: string;
+  metricCode?: string;
   className?: string;
 }) {
   const ordered = React.useMemo(
@@ -183,6 +191,15 @@ export function DeepDive({
                       stroke: "var(--tb-blue)",
                       strokeOpacity: 0.3,
                     }}
+                    content={
+                      entitySlug && metricCode ? (
+                        <ChartTooltipContent
+                          entity={entitySlug}
+                          metric={metricCode}
+                          seriesByPeriod={ordered}
+                        />
+                      ) : undefined
+                    }
                   />
                   {hasBand && (
                     <>
@@ -397,6 +414,68 @@ function LegendDot({
       </svg>
       {label}
     </span>
+  );
+}
+
+// Fix H — Custom tooltip content. Recharts passes `active` and `payload`
+// at hover; we look up the hovered period in the series array (since the
+// payload carries only chart fields, not the source period_code), then
+// fetch the cached narrative. The useNarrative hook is module-level-cached
+// so hovering the same point repeatedly only hits the API once.
+function ChartTooltipContent({
+  active,
+  payload,
+  entity,
+  metric,
+  seriesByPeriod,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: { period: string; periodLabel: string } }>;
+  entity: string;
+  metric: string;
+  seriesByPeriod: DeepDivePoint[];
+}) {
+  const row = active && payload && payload.length > 0 ? payload[0].payload : null;
+  const point = row
+    ? seriesByPeriod.find((p) => p.period === row.period) ?? null
+    : null;
+  const { narrative, hasNarrative } = useNarrative({
+    entity,
+    metric,
+    period: point?.period,
+    enabled: !!point,
+  });
+
+  if (!row || !point) return null;
+
+  return (
+    <div
+      className="min-w-[200px] max-w-[360px] rounded border border-tb-border bg-tb-surface p-2 text-[11px]"
+      style={{ fontFamily: "JetBrains Mono" }}
+    >
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className="text-tb-muted">{point.periodLabel}</span>
+        <span className="font-semibold text-tb-text">{point.valueFormatted}</span>
+      </div>
+      {point.yoy != null && (
+        <div className="mb-1 flex items-center justify-end gap-1 text-[10px] text-tb-muted">
+          <span>YoY</span>
+          <DeltaChip pct={point.yoy} size="xs" />
+        </div>
+      )}
+      {hasNarrative && narrative && (
+        <div className="mt-1.5 border-t border-tb-border pt-1.5">
+          <p
+            className="whitespace-pre-wrap font-sans leading-snug text-tb-text"
+          >
+            {truncateAtSentence(narrative.narrative_text, 280)}
+          </p>
+          <div className="mt-1 text-[9px] uppercase tracking-wider text-tb-muted">
+            {displayReportFilename(narrative.source_report.filename)}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

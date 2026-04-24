@@ -205,6 +205,8 @@ export default async function AffiliateDetailPage({
             filename: r.filename,
             published: r.published_timestamp,
           }))}
+          entitySlug={entity.slug}
+          metricCode="revenue"
         />
       )}
 
