@@ -83,3 +83,57 @@ The 102 un-reprocessed reports retain their pre-sanitiser state. Sanitiser code 
 | `4c612c4` | Phase 3.2 | Parser: strip trademark/special glyphs from number extraction |
 | `e93657d` | Phase 3.3 | Parser: percentage range enforcement on _pct/margin/market_share |
 | `5768eb1` | Phase 3.4 | Docs: overnight v2 defers Italy operator recogniser |
+
+---
+
+## Targeted reprocess continuation (2026-04-24 07:11 → 09:18 local)
+
+Continued the overnight v2 work by reprocessing the remaining 102 reports that were not reached in the original Phase 5 window.
+
+**Approach:** no `--only-unprocessed` CLI flag exists, so flipped the 102 un-reprocessed `gmail_ingested_messages` rows from `status='ingested'` to `status='error'` (temporary), then ran `trailblaze-scrape-gmail --retry-errors`. After the run, unflipped remaining not-yet-reached rows back to `ingested`.
+
+**Monitor fix:** first monitor incorrectly tripped `HALT_ERRORS` on the 102 pre-flipped error rows. Re-armed with corrected logic: COMPLETE = `ingested >= 175 AND errors = 0`, plus stall detector (4 polls with no `fresh` movement).
+
+**120-min HALT cap:** per brief's "Elapsed time >2 hours on this targeted run → HALT". Hit at 121m with 56/102 reprocessed. Killed `trailblaze-scrape-gmail.exe` (pid 1244) cleanly.
+
+**Orphan fix:** one report (US update OH/NV/VA/KY, msg `19a400d45a0173f5`) was mid-parse at kill with `report_id=NULL`. Left its gim status='error'. After killing the main process, unflipped the 45 other intact rows back to `ingested` (report still present, just not re-parsed), then ran `--retry-errors` which picked up only the orphan and reingested it in ~3 minutes.
+
+**Interstitial pyproject.toml rebuild:** an addition of `trailblaze-beacon-compute` entry-point landed in `pyproject.toml` during the run. The editable install went stale mid-session; `pip install -e .` reran cleanly and the retry proceeded.
+
+### Final state after targeted continuation
+
+| Metric | Baseline (23:38) | Post overnight-v2 | Post targeted | Δ vs baseline |
+|---|---|---|---|---|
+| reports | 175 | 175 | 175 | 0 |
+| metric_values | 21,189 | 21,108 | 21,158 | −31 |
+| gim status=ingested | 175 | 175 | 175 | 0 |
+| gim status=error | 0 | 0 | 0 | 0 |
+| Flutter Q3-25 revenue | 3.79 billions USD | 3.79 billions USD | 3.79 billions USD | unchanged ✓ |
+| Betsson Q2-25 casino_revenue | 212.4 M EUR | 212.4 M EUR | 212.4 M EUR | unchanged ✓ |
+| Betsson Q3-25 revenue | 295.8 M EUR | 295.8 M EUR | 296 M EUR | +0.2 rounding ✓ |
+| Evolution Q1-26 revenue | 513.0 M EUR | 513.0 M EUR | 513.0 M EUR | unchanged ✓ |
+| Sportradar Q4-25 revenue | 368.9 M EUR | 368.9 M EUR | 368.9 M EUR | unchanged ✓ |
+
+### Scorecard across both runs
+
+- **Phase 5 overnight:** 73 fresh + 1 post-kill orphan retry (Aristocrat)
+- **Targeted continuation:** 56 fresh + 1 post-kill orphan retry (US update OH/NV)
+- **Total reprocessed under sanitisers 3.1–3.3:** 130 of 175 reports (74%)
+- **Still at pre-sanitiser state:** 45 of 175 reports
+- **Anchor values:** all 5 preserved across both runs
+
+### What remains
+
+45 reports have not yet been reprocessed under the new sanitisers. Reason: both HALT caps (Phase 5 at 180m, targeted at 120m) expired before completion. These reports are in a strictly-safe state (old parsed_at, old warnings); a future reprocess will apply sanitisers without risk.
+
+### Commits landed since journal start
+
+| Hash | Subject |
+|---|---|
+| `8f220b3` | Hero KPI period suffix — complete rollout across all entity types |
+| `a44a1c5` | /markets index — period-aware row labelling |
+| `46d36ec` | Parser: NGR > Revenue sanity guard |
+| `4c612c4` | Parser: strip trademark/special glyphs |
+| `e93657d` | Parser: percentage range enforcement |
+| `5768eb1` | Docs: Italy operator recogniser deferred |
+| `394ab02` | Docs: overnight v2 journal + TODOs resolved |
