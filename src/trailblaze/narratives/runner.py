@@ -181,18 +181,22 @@ def _already_extracted(
 ) -> bool:
     if force:
         return False
+    # Normalise the market_id on both sides to text with a sentinel for
+    # NULL — psycopg's parameter-cast syntax trips if we try to cast a
+    # Python None via ``:mk::text`` inline.
     sentinel = "00000000-0000-0000-0000-000000000000"
+    mk_text = str(t.market_id) if t.market_id is not None else sentinel
     row = session.execute(
         text(
             "SELECT 1 FROM metric_narratives "
             "WHERE entity_id = :e AND metric_id = :m AND period_id = :p "
-            "AND COALESCE(market_id::text, :sentinel) = COALESCE(:mk::text, :sentinel) "
+            "AND COALESCE(market_id::text, :sentinel) = :mk_text "
             "AND source_report_id = :r AND is_stale = false "
             "LIMIT 1"
         ),
         {
             "e": t.entity_id, "m": t.metric_id, "p": t.period_id,
-            "mk": t.market_id, "r": t.source_report_id,
+            "mk_text": mk_text, "r": t.source_report_id,
             "sentinel": sentinel,
         },
     ).first()
