@@ -50,6 +50,17 @@ class NarrativeExtraction:
     extraction_model: str
 
 
+@dataclass(frozen=True)
+class NarrativeResult:
+    # Three outcomes carried in one struct so the runner can distinguish
+    # legitimate coverage gaps (table-only metric values) from prompt
+    # regressions (model hallucinating text that can't be verified). Only
+    # verify_failed contributes to the halt-rate signal.
+    extraction: NarrativeExtraction | None
+    no_match: bool = False
+    verify_failed: bool = False
+
+
 def _number_tokens(text: str) -> list[float]:
     """Extract all numeric tokens from a text blob.
 
@@ -177,19 +188,17 @@ def extract_narrative_for_metric(
     period_label: str,
     market_name: str | None = None,
     model: str = DEFAULT_MODEL,
-) -> NarrativeExtraction | None:
-    """Return a verified narrative paragraph for the target metric, or None.
-
-    Returns None when:
-      * the LLM couldn't find a matching paragraph (``NO_RELEVANT_NARRATIVE``)
-      * the returned paragraph fails numeric verification (no number within
-        ±2% of the target at any supported scale form)
-      * the narrative is empty / too short to be useful
+) -> NarrativeResult:
+    """Return a NarrativeResult describing the outcome of extraction.
 
     Never returns an unverified narrative — that's the product contract.
+    Outcomes:
+      * extraction set → success
+      * no_match=True → legitimate gap (NO_RELEVANT_NARRATIVE / empty input)
+      * verify_failed=True → model returned text but value didn't verify
     """
     if not report_raw_text or not metric_value:
-        return None
+        return NarrativeResult(extraction=None, no_match=True)
     truncated_raw = report_raw_text[:_MAX_RAW_TEXT_CHARS]
 
     prompt = _build_prompt(
@@ -216,18 +225,18 @@ def extract_narrative_for_metric(
             text_parts.append(block.text)
     raw = "".join(text_parts).strip()
     if not raw:
-        return None
+        return NarrativeResult(extraction=None, no_match=True)
     # Strict equality OR leading sentinel — Haiku sometimes appends a
     # justification sentence after the sentinel despite the "no preamble"
     # instruction. Treat any response that STARTS with the sentinel as
     # a clean no-match.
     if raw.startswith("NO_RELEVANT_NARRATIVE"):
-        return None
+        return NarrativeResult(extraction=None, no_match=True)
 
     narrative = raw[:_MAX_NARRATIVE_CHARS].strip()
     if len(narrative) < 30:
         # Model returned a stub; treat as no-match.
-        return None
+        return NarrativeResult(extraction=None, no_match=True)
 
     verified = _verify_value_present(narrative, metric_value, unit_multiplier)
     if not verified:
@@ -235,10 +244,12 @@ def extract_narrative_for_metric(
             "narrative verification failed for %s %s %s (value=%s %s)",
             entity_name, metric_code, period_label, metric_value, unit_multiplier,
         )
-        return None
+        return NarrativeResult(extraction=None, verify_failed=True)
 
-    return NarrativeExtraction(
-        narrative_text=narrative,
-        verified_number_match=True,
-        extraction_model=model,
+    return NarrativeResult(
+        extraction=NarrativeExtraction(
+            narrative_text=narrative,
+            verified_number_match=True,
+            extraction_model=model,
+        ),
     )

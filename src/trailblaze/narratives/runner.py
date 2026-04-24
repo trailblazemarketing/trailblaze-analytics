@@ -27,6 +27,7 @@ from trailblaze.db.session import session_scope
 from trailblaze.narratives.extractor import (
     DEFAULT_MODEL,
     NarrativeExtraction,
+    NarrativeResult,
     extract_narrative_for_metric,
 )
 
@@ -43,16 +44,13 @@ DEFAULT_METRICS = (
 )
 
 # Halt thresholds.
-# Verification-failure HALT was originally 5% but the reality is that
-# some metric values live only in structured table rows (e.g. Allwyn
-# "Sports Betting | 68.0 | -12.8%") with no prose paragraph at all. For
-# those, returning NO_RELEVANT_NARRATIVE is the CORRECT product
-# behaviour. Some entities (lottery operators like Allwyn, ATG) cluster
-# these table-only metrics and the runner's fixed entity-ordered sort
-# means the warm-up window can see a non-representative sample. 25%
-# accommodates that legitimate variance without masking a systemic
-# prompt regression.
-_HALT_VERIFY_FAILURE_PCT = 0.25
+# Distinguish two outcomes the extractor can report:
+#   verify_failed → model returned text but value didn't verify (a true
+#     quality signal; sustained means the prompt or model has regressed).
+#   no_match → model said NO_RELEVANT_NARRATIVE (legitimate coverage gap;
+#     many metric values live only in pipe-delimited table rows).
+# Halt only on the first signal; treat the second as product reality.
+_HALT_VERIFY_FAILURE_PCT = 0.15
 # Warm-up window — before the threshold kicks in, process this many
 # calls so small-sample volatility doesn't trigger false HALTs.
 _WARMUP_CALLS = 50
@@ -345,13 +343,14 @@ def main(
 
     # Real extraction loop.
     succeeded = 0
-    verified_failed = 0
+    no_match = 0
+    verify_failed = 0
     api_errors_in_row = 0
     started = time.time()
 
     for i, t in enumerate(targets, start=1):
         try:
-            extraction = extract_narrative_for_metric(
+            result: NarrativeResult = extract_narrative_for_metric(
                 report_raw_text=t.raw_text,
                 metric_code=t.metric_code,
                 metric_value=t.value_numeric,
@@ -375,29 +374,32 @@ def main(
             time.sleep(2)
             continue
 
-        if extraction is None:
-            verified_failed += 1
-            log.info("[%d/%d] %s %s %s — no match / verify fail",
-                     i, total_scope, t.entity_name, t.metric_code, t.period_label)
-        else:
+        if result.extraction is not None:
             with session_scope() as s:
-                _upsert_narrative(s, t, extraction)
+                _upsert_narrative(s, t, result.extraction)
             succeeded += 1
             log.info("[%d/%d] %s %s %s — OK (%d chars)",
                      i, total_scope, t.entity_name, t.metric_code,
-                     t.period_label, len(extraction.narrative_text))
+                     t.period_label, len(result.extraction.narrative_text))
+        elif result.verify_failed:
+            verify_failed += 1
+            log.info("[%d/%d] %s %s %s — verify fail",
+                     i, total_scope, t.entity_name, t.metric_code, t.period_label)
+        else:
+            no_match += 1
+            log.debug("[%d/%d] %s %s %s — no match (table-only / absent)",
+                      i, total_scope, t.entity_name, t.metric_code, t.period_label)
 
-        # Halt if verification failure rate exceeds the threshold AFTER
-        # the warm-up window. Small-sample volatility guard — lottery /
-        # table-heavy entities cluster together in the entity-ordered
-        # sort and can skew early windows.
-        processed = succeeded + verified_failed
+        # Halt only on verify_failed rate — no_match is a legitimate
+        # product outcome (see threshold comment above).
+        processed = succeeded + verify_failed
         if processed >= _WARMUP_CALLS:
-            fail_rate = verified_failed / processed
+            fail_rate = verify_failed / processed
             if fail_rate > _HALT_VERIFY_FAILURE_PCT:
                 click.echo(
-                    f"HALT: verification failure rate {fail_rate:.1%} "
-                    f"> {_HALT_VERIFY_FAILURE_PCT:.0%} over {processed} calls.",
+                    f"HALT: verify-fail rate {fail_rate:.1%} "
+                    f"> {_HALT_VERIFY_FAILURE_PCT:.0%} over {processed} "
+                    f"verifiable calls ({no_match} no-match not counted).",
                     err=True,
                 )
                 sys.exit(5)
@@ -405,10 +407,11 @@ def main(
     elapsed_min = (time.time() - started) / 60
     click.echo("")
     click.echo("Narrative extraction summary")
-    click.echo(f"  scope:             {total_scope}")
-    click.echo(f"  stored:            {succeeded}")
-    click.echo(f"  no-match / verify: {verified_failed}")
-    click.echo(f"  elapsed:           {elapsed_min:.1f} min")
+    click.echo(f"  scope:         {total_scope}")
+    click.echo(f"  stored:        {succeeded}")
+    click.echo(f"  no-match:      {no_match}")
+    click.echo(f"  verify-fail:   {verify_failed}")
+    click.echo(f"  elapsed:       {elapsed_min:.1f} min")
 
 
 if __name__ == "__main__":
