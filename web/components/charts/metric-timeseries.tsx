@@ -1,4 +1,5 @@
 "use client";
+import * as React from "react";
 import {
   LineChart,
   Line,
@@ -126,12 +127,19 @@ export function MetricTimeseries({
             const key = (payload as { dataKey?: string })?.dataKey;
             const periodCode = (payload as { payload?: { period: string } })
               ?.payload?.period;
-            // Drop the row entry entirely when it's a gap placeholder.
             if (typeof periodCode === "string" && periodCode.startsWith("gap-")) {
               return ["", ""];
             }
+            // Suppress the companion line's null entry so the user doesn't
+            // see two Tooltip rows for the same period.
+            if (value == null) return ["", ""];
+            const baseKey =
+              typeof key === "string"
+                ? key.replace(/__(solid|beacon)$/, "")
+                : key;
+            const bf = baseKey ? beaconFlags?.[baseKey] : undefined;
             const isBeacon =
-              key && periodCode && beaconFlags?.[key]?.has(periodCode);
+              !!(bf && typeof bf.has === "function" && periodCode && bf.has(periodCode));
             return [
               `${valueFormatter(value)}${isBeacon ? " ™" : ""}`,
               name,
@@ -151,54 +159,62 @@ export function MetricTimeseries({
             iconType="plainline"
           />
         )}
-        {series.map((s, i) => {
+        {series.flatMap((s, i) => {
+          // Round 10 Fix 3: Recharts can't do per-segment dash on a single
+          // Line. Render two overlapping Lines — solid skips Beacon™ points
+          // (line breaks via connectNulls=false), dotted fills the "Beacon
+          // zone" (the Beacon point + its immediate neighbours). At shared
+          // points (zone edges), the dot renderer picks one line's dot.
           const color = PALETTE[i % PALETTE.length];
-          return (
+          const bf = beaconFlags?.[s.key];
+          const bhas = (p?: string) =>
+            !!(bf && typeof bf.has === "function" && p && bf.has(p));
+          const inZone = (idx: number) =>
+            bhas(data[idx]?.period) ||
+            bhas(data[idx - 1]?.period) ||
+            bhas(data[idx + 1]?.period);
+          const mkDot = (beaconLine: boolean) => (props: {
+            cx?: number; cy?: number; payload?: { period: string }; index?: number;
+          }) => {
+            const { cx, cy, payload, index } = props;
+            if (cx == null || cy == null || !payload) {
+              return <g key={`${s.key}-${beaconLine ? "b" : "s"}-${index ?? "na"}`} />;
+            }
+            const here = bhas(payload.period);
+            if (beaconLine !== here) {
+              return <g key={`${s.key}-skip-${payload.period}`} />;
+            }
+            return (
+              <circle
+                key={`${s.key}-${beaconLine ? "b" : "s"}-${payload.period}`}
+                cx={cx} cy={cy} r={here ? 3 : 2.5}
+                fill={here ? "var(--tb-beacon)" : color}
+                stroke={here ? "var(--tb-beacon)" : color}
+                strokeWidth={here ? 1 : 0}
+              />
+            );
+          };
+          return [
             <Line
-              key={s.key}
-              type="monotone"
-              dataKey={s.key}
-              name={s.label}
-              stroke={color}
-              strokeWidth={1.5}
-              dot={(props: {
-                cx?: number;
-                cy?: number;
-                payload?: { period: string };
-                index?: number;
-              }) => {
-                const { cx, cy, payload, index } = props;
-                if (cx == null || cy == null || !payload) {
-                  return <g key={`${s.key}-${index ?? "na"}`} />;
-                }
-                const isBeacon = beaconFlags?.[s.key]?.has(payload.period);
-                return (
-                  <circle
-                    key={`${s.key}-${payload.period}`}
-                    cx={cx}
-                    cy={cy}
-                    r={isBeacon ? 3 : 2.5}
-                    fill={isBeacon ? "var(--tb-beacon)" : color}
-                    stroke={isBeacon ? "var(--tb-beacon)" : color}
-                    strokeWidth={isBeacon ? 1 : 0}
-                  />
-                );
-              }}
-              activeDot={{ r: 4, fill: color }}
-              connectNulls={false}
-              strokeDasharray={
-                // If EVERY point in this series is beacon, dot the whole line.
-                beaconFlags?.[s.key] &&
-                data.every((d) =>
-                  d[s.key] == null
-                    ? true
-                    : beaconFlags[s.key].has(d.period),
-                )
-                  ? "3 3"
-                  : undefined
+              key={`${s.key}__solid`} type="monotone" name={s.label}
+              dataKey={(row: TimeseriesPoint) =>
+                bhas(row.period) ? null : row[s.key]
               }
-            />
-          );
+              stroke={color} strokeWidth={1.5} connectNulls={false}
+              dot={mkDot(false)} activeDot={{ r: 4, fill: color }}
+            />,
+            <Line
+              key={`${s.key}__beacon`} type="monotone" name={s.label}
+              dataKey={(row: TimeseriesPoint, idx?: number) => {
+                const i2 = typeof idx === "number" ? idx : data.findIndex((d) => d.period === row.period);
+                return inZone(i2) ? row[s.key] : null;
+              }}
+              stroke={color} strokeWidth={1.5} strokeDasharray="4 3"
+              connectNulls={false}
+              dot={mkDot(true)} activeDot={{ r: 4, fill: "var(--tb-beacon)" }}
+              legendType="none"
+            />,
+          ];
         })}
       </LineChart>
     </ResponsiveContainer>
