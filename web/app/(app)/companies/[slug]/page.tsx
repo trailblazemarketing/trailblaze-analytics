@@ -997,16 +997,15 @@ export default async function CompanyDetailPage({
                 <TD className="text-right">
                   <DeltaChip pct={r.qoq} size="xs" />
                 </TD>
-                <TD className="text-right font-mono">
+                <TD
+                  className="text-right font-mono"
+                  title={
+                    r.marginDerived && r.margin !== "—"
+                      ? "Derived from disclosed EBITDA ÷ Revenue (same period)"
+                      : undefined
+                  }
+                >
                   {r.margin}
-                  {r.marginDerived && r.margin !== "—" && (
-                    <span
-                      className="ml-1 rounded border border-tb-border px-1 text-[8px] uppercase tracking-wider text-tb-muted"
-                      title="Derived from disclosed EBITDA ÷ Revenue (same period)"
-                    >
-                      D
-                    </span>
-                  )}
                 </TD>
                 <TD className="text-right font-mono">{r.actUsers}</TD>
                 <TD>
@@ -1305,17 +1304,12 @@ function SecondaryKpiTile({
       <span className="truncate text-[9px] uppercase tracking-wider text-tb-muted">
         {label}
       </span>
-      <span className="truncate font-mono text-sm font-semibold text-tb-text">
+      <span
+        className="truncate font-mono text-sm font-semibold text-tb-text"
+        title={derived && value ? "Derived from disclosed inputs" : undefined}
+      >
         {value ?? "—"}
         {beacon && value && <sup className="beacon-tm text-[8px]">™</sup>}
-        {derived && value && (
-          <span
-            className="ml-1 text-[7px] uppercase tracking-wider text-tb-muted"
-            title="Derived from disclosed inputs"
-          >
-            D
-          </span>
-        )}
       </span>
       <DeltaChip pct={yoy ?? null} size="xs" />
     </div>
