@@ -260,6 +260,9 @@ export function buildKpiTile(
   // the DB display_name ("Q1 2026", "LTM Q1 2026", "FY 2025"), fall back
   // to the raw code.
   const period = latest.period_display_name ?? latest.period_code ?? null;
+  // Raw period code separately — the narrative cache (API + hook) keys
+  // on the code, not the display string.
+  const periodCode = latest.period_code ?? null;
 
   return {
     code: recipe.code,
@@ -274,6 +277,7 @@ export function buildKpiTile(
     beacon: beacon.get(latest.metric_value_id) ?? null,
     unitHint: unitHint(latest.metric_unit_type),
     period,
+    periodCode,
   };
 }
 

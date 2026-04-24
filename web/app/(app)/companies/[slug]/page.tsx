@@ -40,6 +40,7 @@ import {
 import { Sparkline } from "@/components/beacon/sparkline";
 import { DeltaChip } from "@/components/beacon/delta-chip";
 import { SourceLabel } from "@/components/beacon/source-label";
+import { NarrativeIndicator } from "@/components/narratives/narrative-tooltip";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { ReportLink } from "@/components/reports/report-link";
 import { Badge } from "@/components/ui/badge";
@@ -859,6 +860,9 @@ export default async function CompanyDetailPage({
             source={t.source}
             disclosureStatus={t.disclosureStatus}
             tooltip={t.nativeTooltip}
+            entitySlug={company.slug}
+            metricCode={t.code}
+            periodCode={t.periodCode ?? null}
           />
         ))}
         {kind === "operator" && (
@@ -1120,6 +1124,9 @@ function PrimaryKpiTile({
   source,
   disclosureStatus,
   tooltip,
+  entitySlug,
+  metricCode,
+  periodCode,
 }: {
   label: string;
   value: string | null;
@@ -1129,6 +1136,9 @@ function PrimaryKpiTile({
   source?: import("@/lib/types").SourceType | null;
   disclosureStatus?: import("@/lib/types").DisclosureStatus;
   tooltip?: string | null;
+  entitySlug?: string;
+  metricCode?: string;
+  periodCode?: string | null;
 }) {
   const isBeacon = disclosureStatus === "beacon_estimate";
   const isDerived = disclosureStatus === "derived";
@@ -1163,6 +1173,14 @@ function PrimaryKpiTile({
           >
             Derived
           </span>
+        )}
+        {entitySlug && metricCode && periodCode && value && (
+          <NarrativeIndicator
+            entity={entitySlug}
+            metric={metricCode}
+            period={periodCode}
+            className="ml-1"
+          />
         )}
       </div>
       <div className="flex items-center justify-between">

@@ -32,6 +32,9 @@ export type KpiTile = {
   // Revenue) when it was really a period-scope mismatch. Surfacing the
   // period on every tile makes that explicit.
   period?: string | null;
+  // Raw period code (e.g. "Q3-25") — needed to query the narrative
+  // cache. The display-friendly period string above is for rendering.
+  periodCode?: string | null;
 };
 
 export function Scorecard({
