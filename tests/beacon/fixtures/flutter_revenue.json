@@ -1,0 +1,21 @@
+{
+  "entity_id": "flutter-entertainment",
+  "metric_code": "revenue",
+  "market_id": null,
+  "currency": "USD",
+  "unit_type": "currency",
+  "points": [
+    {"period_code": "2023-Q1", "period_start_date": "2023-01-01", "period_end_date": "2023-03-31", "value": "2400.0", "disclosure_status": "disclosed"},
+    {"period_code": "2023-Q2", "period_start_date": "2023-04-01", "period_end_date": "2023-06-30", "value": "2600.0", "disclosure_status": "disclosed"},
+    {"period_code": "2023-Q3", "period_start_date": "2023-07-01", "period_end_date": "2023-09-30", "value": "3100.0", "disclosure_status": "disclosed"},
+    {"period_code": "2023-Q4", "period_start_date": "2023-10-01", "period_end_date": "2023-12-31", "value": "3400.0", "disclosure_status": "disclosed"},
+    {"period_code": "2024-Q1", "period_start_date": "2024-01-01", "period_end_date": "2024-03-31", "value": "2870.0", "disclosure_status": "disclosed"},
+    {"period_code": "2024-Q2", "period_start_date": "2024-04-01", "period_end_date": "2024-06-30", "value": null, "disclosure_status": "not_disclosed"},
+    {"period_code": "2024-Q3", "period_start_date": "2024-07-01", "period_end_date": "2024-09-30", "value": "3247.0", "disclosure_status": "disclosed"},
+    {"period_code": "2024-Q4", "period_start_date": "2024-10-01", "period_end_date": "2024-12-31", "value": "3790.0", "disclosure_status": "disclosed"},
+    {"period_code": "2025-Q1", "period_start_date": "2025-01-01", "period_end_date": "2025-03-31", "value": "3670.0", "disclosure_status": "disclosed"},
+    {"period_code": "2025-Q2", "period_start_date": "2025-04-01", "period_end_date": "2025-06-30", "value": null, "disclosure_status": "not_disclosed"},
+    {"period_code": "2025-Q3", "period_start_date": "2025-07-01", "period_end_date": "2025-09-30", "value": "3794.0", "disclosure_status": "disclosed"},
+    {"period_code": "2025-Q4", "period_start_date": "2025-10-01", "period_end_date": "2025-12-31", "value": "4200.0", "disclosure_status": "disclosed"}
+  ]
+}

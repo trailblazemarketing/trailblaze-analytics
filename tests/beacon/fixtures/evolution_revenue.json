@@ -1,0 +1,18 @@
+{
+  "entity_id": "evolution",
+  "metric_code": "revenue",
+  "market_id": null,
+  "currency": "EUR",
+  "unit_type": "currency",
+  "points": [
+    {"period_code": "2024-Q1", "period_start_date": "2024-01-01", "period_end_date": "2024-03-31", "value": "458.5", "disclosure_status": "disclosed"},
+    {"period_code": "2024-Q2", "period_start_date": "2024-04-01", "period_end_date": "2024-06-30", "value": "508.5", "disclosure_status": "disclosed"},
+    {"period_code": "2024-Q3", "period_start_date": "2024-07-01", "period_end_date": "2024-09-30", "value": "520.3", "disclosure_status": "disclosed"},
+    {"period_code": "2024-Q4", "period_start_date": "2024-10-01", "period_end_date": "2024-12-31", "value": "541.7", "disclosure_status": "disclosed"},
+    {"period_code": "2025-Q1", "period_start_date": "2025-01-01", "period_end_date": "2025-03-31", "value": "524.3", "disclosure_status": "disclosed"},
+    {"period_code": "2025-Q2", "period_start_date": "2025-04-01", "period_end_date": "2025-06-30", "value": "520.9", "disclosure_status": "disclosed"},
+    {"period_code": "2025-Q3", "period_start_date": "2025-07-01", "period_end_date": "2025-09-30", "value": "538.2", "disclosure_status": "disclosed"},
+    {"period_code": "2025-Q4", "period_start_date": "2025-10-01", "period_end_date": "2025-12-31", "value": "556.4", "disclosure_status": "disclosed"},
+    {"period_code": "2026-Q1", "period_start_date": "2026-01-01", "period_end_date": "2026-03-31", "value": "561.1", "disclosure_status": "disclosed"}
+  ]
+}
