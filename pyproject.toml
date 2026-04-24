@@ -50,6 +50,7 @@ trailblaze-scrape-stocks = "trailblaze.scrapers.cli_stocks:main"
 trailblaze-scrape-companies = "trailblaze.scrapers.cli_companies:main"
 trailblaze-scrape-gmail = "trailblaze.scrapers.cli_gmail:main"
 trailblaze-beacon-compute = "trailblaze.beacon.runner:main"
+trailblaze-extract-narratives = "trailblaze.narratives.runner:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
