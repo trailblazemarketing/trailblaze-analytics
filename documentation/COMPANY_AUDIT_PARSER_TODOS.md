@@ -848,3 +848,48 @@ Recommended follow-up: next full or targeted reprocess on the 102 un-reprocessed
   (a) apply all three live sanitisers to the remaining corpus,
   (b) surface any hidden NGR>Revenue / pct-out-of-range anomalies as first-class flags,
   (c) strip any Italy ™ glyphs that crept in via older extractions.
+
+---
+
+# Round 10 QA — 2026-04-24 — parser carry-forwards
+
+Two display-layer issues surfaced during Round 10 QA trace back to the
+parser / dictionary layer. Frontend captured the symptoms; the fixes
+belong in `src/trailblaze/parser/` and land in a future parser round.
+
+## Round 10 TODO #1 — Betsson Q3-25 Western Europe € 59.3M mis-assigned to Q2-25 column
+
+**Symptom:** On `/companies/betsson`, the Western Europe row in the
+geographic-breakdown matrix shows €59.3M under the Q2-25 column and
+is missing from Q3-25 — but the source report discloses it as a Q3-25
+figure. Other regions (LatAm, CEECA, Nordics) are aligned correctly
+for the same period cohort, so the mis-map is isolated to this single
+row.
+
+**Likely cause:** Period-column recogniser inside the operator
+segment-table extractor mis-indexed the Western Europe row by one
+column on that specific report. Pattern similar to previous round's
+"adjacent-column bleed" class of bug. Single row × single period —
+low blast radius, but misleading in the YoY column.
+
+**Recommended area:** `src/trailblaze/parser/ingest.py` segment-table
+column alignment logic (Phase 1.2 or Unit A refinement pass).
+
+## Round 10 TODO #2 — Italy Online NGR series populated with Online GGR values
+
+**Symptom:** On `/markets/italy` the "Online NGR" hero tile renders
+€1.45B for Q1-26, which matches the Online GGR value exactly. The
+NGR-over-time row in the metrics matrix duplicates the GGR row
+one-for-one across every reported period. Definitionally impossible
+(NGR ≤ GGR by construction — bonuses and chargebacks are deducted).
+
+**Likely cause:** Italy operator recogniser (or a market-level table
+recogniser) conflates NGR and GGR labels for this jurisdiction and
+writes the same disclosed number into both `online_ngr` and
+`online_ggr` metric_value rows. The Hero tile then picks up the
+mirrored value and mis-labels it.
+
+**Recommended area:** `src/trailblaze/parser/` — Italy market table
+recogniser (Phase 2.5 Unit D territory, alongside the deferred Italy
+operator recogniser Pattern 6 referenced earlier in this doc). The
+two are likely related and worth bundling in a single parser round.
