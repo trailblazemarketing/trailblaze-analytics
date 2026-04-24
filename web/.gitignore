@@ -5,3 +5,7 @@ node_modules
 .DS_Store
 .vercel
 next-env.d.ts
+
+# profile pictures uploaded at runtime — ignore everything except .gitkeep
+public/uploads/profile-pictures/*
+!public/uploads/profile-pictures/.gitkeep
