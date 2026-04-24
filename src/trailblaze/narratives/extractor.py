@@ -133,7 +133,7 @@ def _build_prompt(
     mult_display = f" {unit_multiplier}" if unit_multiplier else ""
     ccy_display = f" {currency}" if currency else ""
     scope = market_name if market_name else "group-level"
-    return f"""You are given the full text of an analyst report and a specific metric value. Your job is to find the text from the report that contains and explains this specific value.
+    return f"""You are given the full text of an analyst report and a specific metric value. Your job is to find the paragraph from the report that contains and explains this specific value.
 
 REPORT TEXT:
 ---
@@ -147,17 +147,14 @@ TARGET METRIC:
 - Period: {period_label}
 - Market / scope: {scope}
 
-HARD RULES:
-1. The text you return MUST contain the exact number {metric_value} — or a value within 2% of it (rounding). Scale-swaps like "3.79 billions" ↔ "$3,794m" count.
-2. If the number only appears inside a structured table row (e.g. `Sports Betting | 68.0 | -12.8%`) and there is no surrounding prose sentence that mentions it, return exactly: NO_RELEVANT_NARRATIVE. Do NOT return an adjacent paragraph that discusses a different number.
-3. If no text in the report contains a number within 2% of {metric_value}, return exactly: NO_RELEVANT_NARRATIVE. Never invent, paraphrase, or substitute.
+INSTRUCTIONS:
+1. Find the paragraph (or 1–3 adjacent sentences) in the report prose that discusses this specific metric value for this entity/period/scope.
+2. Return that text VERBATIM — do not paraphrase.
+3. The returned text must contain the target number {metric_value} itself, OR a value within 2% of it (rounding). Scale-swaps count: "3.79 billions" ↔ "$3,794m" is fine.
+4. If the target number only appears inside a structured pipe-delimited table row with NO surrounding prose sentence that mentions it, return exactly: NO_RELEVANT_NARRATIVE. Do not substitute an adjacent paragraph that discusses a different number.
+5. Under 500 characters. No preamble, no "Here is the paragraph:", no commentary.
 
-WHAT TO RETURN:
-- The paragraph, sentence, or 1–3 sentence snippet that contains the target number AND some context about what it represents. Copy verbatim.
-- Under 500 characters.
-- No preamble, no commentary, no "Here is..."
-
-If in doubt, prefer NO_RELEVANT_NARRATIVE over a wrong paragraph. A missing tooltip is fine; a mis-attributed one is not.
+Return either the verbatim paragraph OR the exact token NO_RELEVANT_NARRATIVE.
 """
 
 

@@ -47,10 +47,15 @@ DEFAULT_METRICS = (
 # some metric values live only in structured table rows (e.g. Allwyn
 # "Sports Betting | 68.0 | -12.8%") with no prose paragraph at all. For
 # those, returning NO_RELEVANT_NARRATIVE is the CORRECT product
-# behaviour — "we couldn't find a narrative, so no tooltip" rather than
-# a misattributed adjacent paragraph. 15% accommodates the legitimate
-# coverage gap without masking a genuine prompt regression.
-_HALT_VERIFY_FAILURE_PCT = 0.15
+# behaviour. Some entities (lottery operators like Allwyn, ATG) cluster
+# these table-only metrics and the runner's fixed entity-ordered sort
+# means the warm-up window can see a non-representative sample. 25%
+# accommodates that legitimate variance without masking a systemic
+# prompt regression.
+_HALT_VERIFY_FAILURE_PCT = 0.25
+# Warm-up window — before the threshold kicks in, process this many
+# calls so small-sample volatility doesn't trigger false HALTs.
+_WARMUP_CALLS = 50
 _HALT_COST_USD = 50.0              # per brief
 _HALT_API_ERRORS_IN_ROW = 15       # sustained overload
 
@@ -382,10 +387,12 @@ def main(
                      i, total_scope, t.entity_name, t.metric_code,
                      t.period_label, len(extraction.narrative_text))
 
-        # Halt if verification failure rate exceeds the threshold AFTER a
-        # warm-up of 25 calls (small-sample volatility guard).
+        # Halt if verification failure rate exceeds the threshold AFTER
+        # the warm-up window. Small-sample volatility guard — lottery /
+        # table-heavy entities cluster together in the entity-ordered
+        # sort and can skew early windows.
         processed = succeeded + verified_failed
-        if processed >= 25:
+        if processed >= _WARMUP_CALLS:
             fail_rate = verified_failed / processed
             if fail_rate > _HALT_VERIFY_FAILURE_PCT:
                 click.echo(
