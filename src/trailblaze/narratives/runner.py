@@ -43,7 +43,14 @@ DEFAULT_METRICS = (
 )
 
 # Halt thresholds.
-_HALT_VERIFY_FAILURE_PCT = 0.05   # >5% non-verifying → scope / prompt issue
+# Verification-failure HALT was originally 5% but the reality is that
+# some metric values live only in structured table rows (e.g. Allwyn
+# "Sports Betting | 68.0 | -12.8%") with no prose paragraph at all. For
+# those, returning NO_RELEVANT_NARRATIVE is the CORRECT product
+# behaviour — "we couldn't find a narrative, so no tooltip" rather than
+# a misattributed adjacent paragraph. 15% accommodates the legitimate
+# coverage gap without masking a genuine prompt regression.
+_HALT_VERIFY_FAILURE_PCT = 0.15
 _HALT_COST_USD = 50.0              # per brief
 _HALT_API_ERRORS_IN_ROW = 15       # sustained overload
 

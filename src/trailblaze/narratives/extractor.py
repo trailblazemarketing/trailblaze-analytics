@@ -133,8 +133,7 @@ def _build_prompt(
     mult_display = f" {unit_multiplier}" if unit_multiplier else ""
     ccy_display = f" {currency}" if currency else ""
     scope = market_name if market_name else "group-level"
-    return f"""You are given the full text of an analyst report and a specific metric value.
-Your job is to find the paragraph (or sentence, if prose is dense) that contains or explains this specific value and entity.
+    return f"""You are given the full text of an analyst report and a specific metric value. Your job is to find the text from the report that contains and explains this specific value.
 
 REPORT TEXT:
 ---
@@ -148,14 +147,17 @@ TARGET METRIC:
 - Period: {period_label}
 - Market / scope: {scope}
 
-INSTRUCTIONS:
-1. Find the paragraph in the report that discusses this specific metric value for this specific entity/period/scope.
-2. Return that paragraph verbatim — do not paraphrase.
-3. The paragraph MUST contain either the exact number {metric_value} or a value within 2% of it (rounding tolerance). Numbers may appear at a different scale (e.g. stored as "3.79 billions" but the prose writes "$3,794M") — that still counts.
-4. Keep it under 500 characters.
-5. If no paragraph clearly discusses this metric, return exactly: NO_RELEVANT_NARRATIVE
+HARD RULES:
+1. The text you return MUST contain the exact number {metric_value} — or a value within 2% of it (rounding). Scale-swaps like "3.79 billions" ↔ "$3,794m" count.
+2. If the number only appears inside a structured table row (e.g. `Sports Betting | 68.0 | -12.8%`) and there is no surrounding prose sentence that mentions it, return exactly: NO_RELEVANT_NARRATIVE. Do NOT return an adjacent paragraph that discusses a different number.
+3. If no text in the report contains a number within 2% of {metric_value}, return exactly: NO_RELEVANT_NARRATIVE. Never invent, paraphrase, or substitute.
 
-RESPOND WITH ONLY THE PARAGRAPH OR NO_RELEVANT_NARRATIVE, NO PREAMBLE.
+WHAT TO RETURN:
+- The paragraph, sentence, or 1–3 sentence snippet that contains the target number AND some context about what it represents. Copy verbatim.
+- Under 500 characters.
+- No preamble, no commentary, no "Here is..."
+
+If in doubt, prefer NO_RELEVANT_NARRATIVE over a wrong paragraph. A missing tooltip is fine; a mis-attributed one is not.
 """
 
 
@@ -218,7 +220,11 @@ def extract_narrative_for_metric(
     raw = "".join(text_parts).strip()
     if not raw:
         return None
-    if raw == "NO_RELEVANT_NARRATIVE":
+    # Strict equality OR leading sentinel — Haiku sometimes appends a
+    # justification sentence after the sentinel despite the "no preamble"
+    # instruction. Treat any response that STARTS with the sentinel as
+    # a clean no-match.
+    if raw.startswith("NO_RELEVANT_NARRATIVE"):
         return None
 
     narrative = raw[:_MAX_NARRATIVE_CHARS].strip()
