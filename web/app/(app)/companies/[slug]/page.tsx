@@ -413,6 +413,22 @@ export default async function CompanyDetailPage({
         .map((r) => r.period_code),
     ),
   };
+  // Round 10 Fix 4: rich per-point Beacon metadata for the chart tooltip
+  // (confidence + tier + methods_used). Pulled from beacon_estimates rows
+  // already loaded via getBeaconEstimatesForValues above.
+  const beaconMetaRev: Record<string, { confidence?: number | null; tier?: string | null; methods?: string[] | null }> = {};
+  for (const r of chartRows) {
+    if (r.disclosure_status !== "beacon_estimate") continue;
+    const be = beacon.get(r.metric_value_id);
+    if (!be) continue;
+    const inputs = (be.inputs ?? {}) as Record<string, unknown>;
+    beaconMetaRev[r.period_code] = {
+      confidence: be.confidence_score != null ? Number(be.confidence_score) : null,
+      tier: typeof inputs.final_confidence_tier === "string" ? inputs.final_confidence_tier : null,
+      methods: Array.isArray(inputs.methods_used) ? (inputs.methods_used as string[]) : null,
+    };
+  }
+  const beaconMeta = { [revChartLabel]: beaconMetaRev };
 
   // CD6: Breakdown table (cadence from `cadenceLabel`) — columns from scorecard byCode
   // Period · Revenue · YoY · QoQ · EBITDA Margin · Active Users · Source · Confidence
@@ -929,6 +945,7 @@ export default async function CompanyDetailPage({
                 data={chartData}
                 series={[{ key: revChartLabel, label: revChartLabel }]}
                 beaconFlags={beaconFlags}
+                beaconMeta={beaconMeta}
                 height={260}
               />
             ) : (

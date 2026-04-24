@@ -23,6 +23,19 @@ export type BeaconFlags = {
   [seriesKey: string]: Set<string>; // period codes where the value is beacon
 };
 
+// Round 10 Fix 4: rich Tooltip content on Beacon points. Optional per-point
+// metadata so the hover card can render "Trailblaze Beacon™ — modeled
+// estimate" plus confidence + methods. Keyed [seriesKey][periodCode].
+export type BeaconMeta = {
+  [seriesKey: string]: {
+    [periodCode: string]: {
+      confidence?: number | null;
+      tier?: string | null;
+      methods?: string[] | null;
+    };
+  };
+};
+
 // Default Y-axis / tooltip formatter — EUR-compact (€3.6B, €247.2M, €812K).
 // Callers override via `valueFormatter` to switch currency or unit (e.g. %).
 function defaultFormatter(v: unknown): string {
@@ -48,6 +61,7 @@ export function MetricTimeseries({
   data,
   series,
   beaconFlags,
+  beaconMeta,
   height = 280,
   yLabel,
   valueFormatter = defaultFormatter,
@@ -55,6 +69,7 @@ export function MetricTimeseries({
   data: TimeseriesPoint[];
   series: { key: string; label: string }[];
   beaconFlags?: BeaconFlags;
+  beaconMeta?: BeaconMeta;
   height?: number;
   yLabel?: string;
   // T2 small-fix 1: currency-aware Y-axis + tooltip formatter. Default is
@@ -130,8 +145,6 @@ export function MetricTimeseries({
             if (typeof periodCode === "string" && periodCode.startsWith("gap-")) {
               return ["", ""];
             }
-            // Suppress the companion line's null entry so the user doesn't
-            // see two Tooltip rows for the same period.
             if (value == null) return ["", ""];
             const baseKey =
               typeof key === "string"
@@ -140,6 +153,33 @@ export function MetricTimeseries({
             const bf = baseKey ? beaconFlags?.[baseKey] : undefined;
             const isBeacon =
               !!(bf && typeof bf.has === "function" && periodCode && bf.has(periodCode));
+            const meta =
+              isBeacon && baseKey && periodCode
+                ? beaconMeta?.[baseKey]?.[periodCode]
+                : null;
+            if (isBeacon && meta) {
+              return [
+                <span style={{ display: "inline-block" }}>
+                  <span>{valueFormatter(value)} </span>
+                  <span style={{ color: "var(--tb-beacon)" }}>™</span>
+                  <span style={{ display: "block", color: "var(--tb-beacon)", fontSize: 10, marginTop: 2 }}>
+                    Trailblaze Beacon™ — modeled estimate
+                  </span>
+                  {meta.confidence != null && (
+                    <span style={{ display: "block", color: "var(--tb-text-muted)", fontSize: 10 }}>
+                      Confidence: {(meta.confidence * 100).toFixed(1)}%
+                      {meta.tier ? ` (${meta.tier})` : ""}
+                    </span>
+                  )}
+                  {meta.methods && meta.methods.length > 0 && (
+                    <span style={{ display: "block", color: "var(--tb-text-muted)", fontSize: 10 }}>
+                      Methods: {meta.methods.join(", ")}
+                    </span>
+                  )}
+                </span>,
+                name,
+              ];
+            }
             return [
               `${valueFormatter(value)}${isBeacon ? " ™" : ""}`,
               name,
