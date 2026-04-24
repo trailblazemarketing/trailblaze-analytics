@@ -57,7 +57,7 @@ export function NarrativeIndicator({
       aria-label="View source narrative"
     >
       <span
-        className="inline-block rounded-full bg-tb-blue/60"
+        className="tb-narrative-dot"
         style={{ width: size, height: size }}
         aria-hidden="true"
       />
@@ -84,7 +84,7 @@ function NarrativeCard({
     : null;
   return (
     <div
-      className="pointer-events-auto fixed z-50 max-w-[360px] animate-in fade-in-0 rounded border border-tb-blue/30 bg-tb-surface px-3 py-2 text-[11px] leading-relaxed text-tb-text shadow-lg"
+      className="pointer-events-auto fixed z-50 max-w-[360px] animate-in fade-in-0 rounded border border-tb-narrative/30 bg-tb-surface px-3 py-2 text-[11px] leading-relaxed text-tb-text shadow-lg"
       style={{ left, top }}
       role="tooltip"
     >

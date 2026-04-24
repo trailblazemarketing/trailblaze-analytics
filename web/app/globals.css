@@ -21,6 +21,25 @@
   --tb-success: #10B981;
   --tb-beacon: #F59E0B;
   --tb-danger: #EF4444;
+  /* Fix J — global token for the "has source-narrative" affordance.
+   * Teal so it reads distinct from both brand blue (--tb-blue) and
+   * Beacon™ amber (--tb-beacon) at thumbnail sizes. */
+  --tb-narrative: #22D3EE;
+}
+
+/* Fix J — shared dot style for the has-narrative affordance. Any
+ * surface that wants to flag "a verified paragraph is cached for this
+ * cell" should apply .tb-narrative-dot so the visual stays consistent
+ * across Hero tiles, chart tooltips, and leaderboard rows. */
+.tb-narrative-dot {
+  display: inline-block;
+  background: var(--tb-narrative);
+  opacity: 0.8;
+  border-radius: 9999px;
+  /* Default 8px — consumers override with inline width/height when needed. */
+  width: 8px;
+  height: 8px;
+  vertical-align: middle;
 }
 
 html,

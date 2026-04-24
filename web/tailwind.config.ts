@@ -20,6 +20,7 @@ const config: Config = {
           muted: "var(--tb-text-muted)",
           success: "var(--tb-success)",
           beacon: "var(--tb-beacon)",
+          narrative: "var(--tb-narrative)",
           danger: "var(--tb-danger)",
         },
       },
