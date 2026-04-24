@@ -66,3 +66,7 @@ web/tsconfig.tsbuildinfo
 secrets/
 
 backups/
+
+# local Claude Code worktrees + background logs
+.claude/
+tmp/
