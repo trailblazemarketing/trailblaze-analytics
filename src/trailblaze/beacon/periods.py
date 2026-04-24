@@ -51,12 +51,24 @@ class Quarter:
 
 
 def parse_quarter(code: str) -> Quarter:
-    """Parse ``"2025-Q3"`` → ``Quarter(2025, 3)``.
+    """Parse a quarterly period code into ``Quarter(year, quarter)``.
 
-    Raises ``ValueError`` on non-``YYYY-QN`` formats. Not a strict validator
-    — accepts anything matching the split-on-``-`` shape — but the integration
-    layer should normalise Trailblaze period codes before calling the engine.
+    Accepts two formats:
+      * ``"2025-Q3"`` — ISO-ish, sandbox default
+      * ``"Q3-25"``   — 2-digit year (Trailblaze DB convention)
+
+    Two-digit years use the usual 1970 pivot: ``00..69`` → ``2000..2069``,
+    ``70..99`` → ``1970..1999``. The integration layer should normalise
+    early; this parser is forgiving at the boundary.
     """
+    if code.startswith("Q") and "-" in code:
+        q_part, y_part = code.split("-", 1)
+        quarter = int(q_part[1:])
+        yy = int(y_part)
+        year = (2000 + yy) if yy < 70 else (1900 + yy)
+        if yy >= 100:
+            year = yy  # 4-digit year after the "Q3-" prefix — unusual but honour it
+        return Quarter(year, quarter)
     year_str, q_str = code.split("-Q", 1)
     return Quarter(int(year_str), int(q_str))
 

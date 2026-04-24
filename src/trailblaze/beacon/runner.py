@@ -36,6 +36,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from trailblaze.beacon import BeaconEstimate, estimate_series
+from trailblaze.beacon.periods import parse_quarter
 from trailblaze.beacon.types import TimeSeries, TimeSeriesPoint
 from trailblaze.db.session import session_scope
 
@@ -231,9 +232,13 @@ def _persist(
         log.warning("unknown metric_code %s — skipping", estimate.metric_code)
         return False
 
+    # Engine outputs period_code in sandbox's ISO form (``2025-Q4``). The
+    # Trailblaze DB stores the inverse form (``Q4-25``). Look up both.
+    q = parse_quarter(estimate.period_code)
+    db_code = f"Q{q.quarter}-{q.year % 100:02d}"
     period = session.execute(
-        sa.text("SELECT id::text AS id FROM periods WHERE code = :c"),
-        {"c": estimate.period_code},
+        sa.text("SELECT id::text AS id FROM periods WHERE code IN (:iso, :db)"),
+        {"iso": estimate.period_code, "db": db_code},
     ).first()
     if period is None:
         log.warning("unknown period_code %s — skipping", estimate.period_code)
