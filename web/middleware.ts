@@ -24,6 +24,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "tb_session";
+const ROLE_COOKIE = "tb_role";
 
 // Path-prefix shortcuts (starts-with matches).
 const PUBLIC_PREFIXES = [
@@ -40,7 +41,14 @@ const GATED_PREFIXES = [
   "/affiliates",
   "/reports",
   "/methodology",
+  "/profile",
 ];
+
+// /admin and /api/admin additionally require role='admin'. The role is
+// inferred from the tb_role cookie set at login. The cookie is a
+// middleware-cheap hint only — every admin API route re-verifies role
+// via the DB so a spoofed cookie can't actually access admin data.
+const ADMIN_PREFIXES = ["/admin", "/api/admin"];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -75,6 +83,27 @@ export async function middleware(req: NextRequest) {
     url.pathname = "/login";
     if (!isGatedApi) url.searchParams.set("redirect", pathname);
     return NextResponse.redirect(url);
+  }
+
+  // Admin-only prefixes. Non-admin users (or users with a missing role
+  // cookie) are 302'd to /overview for page routes and 403'd for API
+  // routes. The admin API itself re-verifies against the DB.
+  const isAdminRoute = ADMIN_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(p + "/"),
+  );
+  if (isAdminRoute) {
+    const role = req.cookies.get(ROLE_COOKIE)?.value;
+    if (role !== "admin") {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json(
+          { ok: false, error: "forbidden" },
+          { status: 403 },
+        );
+      }
+      const url = req.nextUrl.clone();
+      url.pathname = "/overview";
+      return NextResponse.redirect(url);
+    }
   }
 
   return NextResponse.next();
