@@ -18,10 +18,19 @@ function getPool(): Pool {
     const connectionString =
       process.env.DATABASE_URL ||
       "postgresql://trailblaze:trailblaze@localhost:5432/trailblaze";
+    // node-postgres doesn't reliably honour `sslmode=require` from the URL
+    // alone — Neon + most managed Postgres need an explicit ssl object.
+    // Heuristic: require SSL whenever the URL isn't pointing at localhost
+    // (dev machines use plain TCP; every real host expects TLS).
+    const needsSsl =
+      !/^postgres(ql)?(\+psycopg)?:\/\/[^@]*@(localhost|127\.0\.0\.1|::1)(:|\/)/.test(
+        connectionString,
+      );
     globalThis.__tb_pool = new Pool({
       connectionString,
       max: 10,
       idleTimeoutMillis: 30_000,
+      ssl: needsSsl ? { rejectUnauthorized: false } : undefined,
     });
   }
   return globalThis.__tb_pool;
