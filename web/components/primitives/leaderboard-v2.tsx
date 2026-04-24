@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Sparkline } from "@/components/beacon/sparkline";
 import { DeltaChip } from "@/components/beacon/delta-chip";
 import { SourceLabel } from "@/components/beacon/source-label";
+import { NarrativeIndicator } from "@/components/narratives/narrative-tooltip";
 import type { DisclosureStatus, SourceType } from "@/lib/types";
 
 // Leaderboard v2 — entity-agnostic analytical primitive.
@@ -93,6 +94,8 @@ export function LeaderboardV2({
   showViewAll,
   viewAllHref,
   onRowClick,
+  metricCode,
+  periodCode,
   className,
   emptyMessage = "No data.",
 }: {
@@ -110,6 +113,11 @@ export function LeaderboardV2({
   showViewAll?: boolean;
   viewAllHref?: string;
   onRowClick?: (rowId: string) => void;
+  // Fix I — when both are provided, each row renders a NarrativeIndicator
+  // next to its value, keyed on (row.id, metricCode, periodCode). row.id
+  // must be the entity slug for the lookup to resolve.
+  metricCode?: string;
+  periodCode?: string;
   className?: string;
   emptyMessage?: string;
 }) {
@@ -216,12 +224,12 @@ export function LeaderboardV2({
                     </tr>
                   );
                   const rowEls = g.rows.map((row, i) =>
-                    renderRow(row, i, columns, maxShare, onRowClick),
+                    renderRow(row, i, columns, maxShare, onRowClick, metricCode, periodCode),
                   );
                   return [header, ...rowEls];
                 })
               : visibleRows.map((row, i) =>
-                  renderRow(row, i, columns, maxShare, onRowClick),
+                  renderRow(row, i, columns, maxShare, onRowClick, metricCode, periodCode),
                 )}
 
             {total && (
@@ -288,6 +296,8 @@ function renderRow(
   columns: LeaderboardV2Column[],
   maxShare: number,
   onRowClick?: (id: string) => void,
+  metricCode?: string,
+  periodCode?: string,
 ): React.ReactElement {
   const isBeacon =
     row.beacon === true ||
@@ -336,8 +346,18 @@ function renderRow(
           className="whitespace-nowrap px-3 py-1 text-right font-mono text-tb-text"
           title={row.value.nativeTooltip ?? undefined}
         >
-          {row.value.formatted}
-          {isBeacon && <sup className="beacon-tm">™</sup>}
+          <span className="inline-flex items-center gap-1">
+            <span>{row.value.formatted}</span>
+            {isBeacon && <sup className="beacon-tm">™</sup>}
+            {metricCode && periodCode && (
+              <NarrativeIndicator
+                entity={row.id}
+                metric={metricCode}
+                period={periodCode}
+                size={6}
+              />
+            )}
+          </span>
         </td>
       )}
       {columns.includes("share") && (

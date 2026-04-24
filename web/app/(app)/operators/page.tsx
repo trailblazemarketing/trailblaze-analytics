@@ -194,6 +194,8 @@ export default async function OperatorsPage({
         total={revenue.total}
         columns={columns}
         maxRows={25}
+        metricCode="revenue"
+        periodCode={periodCode ?? undefined}
         extraHeader={
           <span className="flex items-center gap-2 font-mono text-[9px] uppercase tracking-wider text-tb-muted">
             <span>Price</span>
@@ -260,6 +262,8 @@ export default async function OperatorsPage({
               : null
           }
           maxRows={25}
+          metricCode="revenue"
+          periodCode={periodCode ?? undefined}
         />
       </div>
 

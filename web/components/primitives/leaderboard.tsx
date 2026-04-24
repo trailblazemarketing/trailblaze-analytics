@@ -6,6 +6,7 @@ import { Sparkline } from "@/components/beacon/sparkline";
 import { DeltaChip } from "@/components/beacon/delta-chip";
 import { Badge } from "@/components/ui/badge";
 import { SourceLabel } from "@/components/beacon/source-label";
+import { NarrativeIndicator } from "@/components/narratives/narrative-tooltip";
 import type { DisclosureStatus, SourceType } from "@/lib/types";
 
 export type LeaderboardRow = {
@@ -65,6 +66,8 @@ export function Leaderboard({
   className,
   extraHeader,
   forceBeaconColumn,
+  metricCode,
+  periodCode,
 }: {
   title: string;
   subtitle?: string;
@@ -99,6 +102,11 @@ export function Leaderboard({
   className?: string;
   extraHeader?: React.ReactNode;
   forceBeaconColumn?: boolean; // G3: keep beacon_coverage visible even when all-zero
+  // Fix I — when both are provided, each row renders a NarrativeIndicator
+  // next to its value. row.id must be the entity or market slug for the
+  // narrative lookup to resolve.
+  metricCode?: string;
+  periodCode?: string;
 }) {
   // Bucket-row detection: entities named "Other" / "Others" / "Other
   // Proprietary Brands" / "Rest of market" etc. are aggregate buckets,
@@ -283,11 +291,21 @@ export function Leaderboard({
                     className="whitespace-nowrap px-3 py-1 text-right font-mono text-tb-text"
                     title={row.nativeTooltip ?? undefined}
                   >
-                    {row.valueFormatted}
-                    {(row.disclosureStatus === "beacon_estimate" ||
-                      row.disclosureStatus === "derived") && (
-                      <sup className="beacon-tm">™</sup>
-                    )}
+                    <span className="inline-flex items-center justify-end gap-1">
+                      <span>{row.valueFormatted}</span>
+                      {(row.disclosureStatus === "beacon_estimate" ||
+                        row.disclosureStatus === "derived") && (
+                        <sup className="beacon-tm">™</sup>
+                      )}
+                      {metricCode && periodCode && (
+                        <NarrativeIndicator
+                          entity={row.id}
+                          metric={metricCode}
+                          period={periodCode}
+                          size={6}
+                        />
+                      )}
+                    </span>
                   </td>
                 )}
                 {effectiveColumns.includes("share") && (
