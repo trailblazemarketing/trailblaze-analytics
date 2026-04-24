@@ -21,20 +21,6 @@
 //
 // Supabase (Phase 7) replaces this whole file.
 
-// Edge-runtime polyfill. Next 14.2.x's middleware bundle transitively
-// includes ua-parser-js, which has `a.ab = __dirname + "/"` as a module-
-// load side effect (asset base path for Node). On Vercel's Edge runtime
-// `__dirname` is undefined and loading the middleware throws
-// MIDDLEWARE_INVOCATION_FAILED before our code runs. Shim it as the
-// empty root path — it's only used for asset-path resolution we don't
-// need. Remove when Next 15 migration lands (ua-parser-js got swapped
-// for an Edge-safe alternative upstream).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-if (typeof (globalThis as any).__dirname === "undefined") {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (globalThis as any).__dirname = "/";
-}
-
 import { NextResponse, type NextRequest } from "next/server";
 
 const SESSION_COOKIE = "tb_session";
