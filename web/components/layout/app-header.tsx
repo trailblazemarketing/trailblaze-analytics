@@ -42,12 +42,24 @@ const TABS = [
 
 export function AppHeader({
   username,
+  role,
   onSignOut,
 }: {
   username: string | null;
+  role: string | null;
   onSignOut: () => void;
 }) {
   const pathname = usePathname();
+  const tabs = role === "admin"
+    ? [
+        ...TABS,
+        {
+          href: "/admin",
+          label: "Admin",
+          match: (p: string) => p.startsWith("/admin"),
+        },
+      ]
+    : TABS;
 
   return (
     <header className="sticky top-0 z-30 flex h-12 items-center gap-4 border-b border-tb-border bg-tb-bg/90 px-4 backdrop-blur">
@@ -55,7 +67,7 @@ export function AppHeader({
         <TrailblazeLogo />
       </Link>
       <nav className="ml-2 flex items-center gap-0.5">
-        {TABS.map((t) => {
+        {tabs.map((t) => {
           const active = t.match(pathname);
           return (
             <Link
@@ -79,7 +91,9 @@ export function AppHeader({
       </div>
       <div className="flex shrink-0 items-center gap-2 font-mono text-[10px] text-tb-muted">
         {username && (
-          <span className="truncate text-tb-muted">{username}</span>
+          <Link href="/profile" className="truncate text-tb-muted hover:text-tb-text">
+            {username}
+          </Link>
         )}
         <span aria-hidden>·</span>
         <button
