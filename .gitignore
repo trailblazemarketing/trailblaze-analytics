@@ -35,8 +35,8 @@ env/
 
 # Env / secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.pem
 *.key
 
@@ -58,10 +58,15 @@ desktop.ini
 scripts/ecb-hist.xml
 
 # Web app (Next.js)
+.next/
+node_modules/
 web/.next/
 web/node_modules/
 web/.env.local
 web/tsconfig.tsbuildinfo
+
+# Runtime logs
+documentation/demo-requests.log
 
 secrets/
 
