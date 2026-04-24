@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { getSessionUser } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,9 @@ export const dynamic = "force-dynamic";
 // returns null body with `X-Narrative-Status: not-cached`. Client UI
 // should render no tooltip + hide the has-narrative indicator.
 export async function GET(req: Request) {
+  const session = await getSessionUser();
+  if (!session) return NextResponse.json({ ok: false }, { status: 401 });
+
   const { searchParams } = new URL(req.url);
   const entity = searchParams.get("entity")?.trim();
   const metric = searchParams.get("metric")?.trim();

@@ -6,6 +6,7 @@ import {
   getReportAssociations,
 } from "@/lib/queries/reports";
 import { getBeaconEstimatesForValues } from "@/lib/queries/markets";
+import { getSessionUser } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,9 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  const session = await getSessionUser();
+  if (!session) return NextResponse.json({ ok: false }, { status: 401 });
+
   const report = await getReportById(params.id);
   if (!report) return NextResponse.json({ error: "not_found" }, { status: 404 });
 

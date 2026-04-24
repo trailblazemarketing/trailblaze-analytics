@@ -5,13 +5,18 @@
 // in the "Live citation stream" panel are placeholders for now — wiring
 // them to live DB values is a follow-up (see TODO below).
 //
-// Logged-in users never land here: middleware at /middleware.ts redirects
-// `/` → `/overview` when a tb_session cookie is present.
+// Logged-in users get redirected to /overview server-side below.
+// Previously this was middleware-driven; moved here when middleware was
+// dropped due to a Next 14.2.x Edge-runtime crash on Vercel.
 
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { DemoRequestForm } from "@/components/marketing/demo-request-form";
+import { getSessionUser } from "@/lib/auth/session";
 
-export default function SplashPage() {
+export default async function SplashPage() {
+  const session = await getSessionUser();
+  if (session) redirect("/overview");
   return (
     <div className="min-h-screen bg-tb-bg text-tb-text">
       {/* Header */}

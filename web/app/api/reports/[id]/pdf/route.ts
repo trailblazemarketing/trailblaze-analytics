@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { queryOne } from "@/lib/db";
+import { getSessionUser } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +16,9 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  const session = await getSessionUser();
+  if (!session) return NextResponse.json({ ok: false }, { status: 401 });
+
   const row = await queryOne<{
     filename: string;
     local_path: string | null;
