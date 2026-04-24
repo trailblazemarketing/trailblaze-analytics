@@ -35,6 +35,8 @@ export function TimeMatrix({
   className,
   valueLabel,
   csvFilename,
+  onCellClick,
+  onRowHeaderClick,
 }: {
   title: string;
   periods: string[]; // period codes, ordered oldest → newest
@@ -46,6 +48,12 @@ export function TimeMatrix({
   className?: string;
   valueLabel?: string;
   csvFilename?: string;
+  // UI_SPEC_1 Primitive 2 drill-down hooks. When provided, the matrix
+  // becomes interactive: cell clicks open a value panel, header clicks
+  // drill into the entity/market. When omitted, existing href-based
+  // navigation on the row name still works.
+  onCellClick?: (rowKey: string, period: string) => void;
+  onRowHeaderClick?: (rowKey: string) => void;
 }) {
   const [heatOn, setHeatOn] = React.useState(false);
   const [mode, setMode] = React.useState<"absolute" | "yoy" | "qoq">(
@@ -207,7 +215,15 @@ export function TimeMatrix({
                         {r.typeChip}
                       </Badge>
                     )}
-                    {r.href ? (
+                    {onRowHeaderClick ? (
+                      <button
+                        type="button"
+                        onClick={() => onRowHeaderClick(r.id)}
+                        className="truncate text-left text-tb-text hover:text-tb-blue"
+                      >
+                        {r.name}
+                      </button>
+                    ) : r.href ? (
                       <Link
                         href={r.href}
                         className="truncate text-tb-text hover:text-tb-blue"
@@ -233,9 +249,15 @@ export function TimeMatrix({
                   return (
                     <td
                       key={p}
+                      onClick={
+                        onCellClick && cell?.value != null
+                          ? () => onCellClick(r.id, p)
+                          : undefined
+                      }
                       className={cn(
                         "whitespace-nowrap px-2 py-1.5 text-right font-mono",
                         isBeacon && "border-l-2 border-l-tb-beacon",
+                        onCellClick && cell?.value != null && "cursor-pointer hover:bg-tb-border/40",
                       )}
                       style={
                         heat != null

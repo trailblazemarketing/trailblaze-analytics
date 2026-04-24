@@ -56,6 +56,7 @@ export function DeepDive({
   narratives = [],
   sourceReports = [],
   beaconByPeriod = {},
+  onComparisonAdd,
   className,
 }: {
   title: string;
@@ -64,6 +65,10 @@ export function DeepDive({
   narratives?: DeepDiveNarrative[];
   sourceReports?: { id: string; filename: string; published: string | null }[];
   beaconByPeriod?: Record<string, BeaconEstimate>;
+  // UI_SPEC_1 Primitive 4 — "Add comparison" overlay another entity's
+  // series on the chart. When handler is provided, renders the action
+  // button in the header. When omitted, header stays clean.
+  onComparisonAdd?: () => void;
   className?: string;
 }) {
   const ordered = React.useMemo(
@@ -114,6 +119,16 @@ export function DeepDive({
         <div className="flex items-center gap-3 text-[10px] text-tb-muted">
           <LegendDot label="Disclosed" color="var(--tb-blue)" />
           <LegendDot label="Beacon™" color="var(--tb-beacon)" dashed />
+          {onComparisonAdd && (
+            <button
+              type="button"
+              onClick={onComparisonAdd}
+              className="rounded border border-tb-border px-2 py-0.5 text-[10px] text-tb-text transition-colors hover:border-tb-blue hover:text-tb-blue"
+              title="Overlay another entity's series on this chart"
+            >
+              + Add comparison
+            </button>
+          )}
         </div>
       </div>
 

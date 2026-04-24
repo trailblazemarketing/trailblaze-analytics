@@ -18,6 +18,8 @@ import type {
   LeaderboardRow,
   LeaderboardColumn,
 } from "@/components/primitives/leaderboard";
+import { LeaderboardV2 } from "@/components/primitives/leaderboard-v2";
+import type { LeaderboardV2Row } from "@/components/primitives/leaderboard-v2";
 import { PeriodSelector } from "@/components/layout/period-selector";
 import { MoversRow } from "@/components/overview/movers-row";
 import { DeltaChip } from "@/components/beacon/delta-chip";
@@ -204,6 +206,62 @@ export default async function OperatorsPage({
           </span>
         }
       />
+
+      {/* V2 preview — UI_SPEC_1 primitive applied to the same dataset.
+          Renders next to the existing leaderboard so analysts can
+          compare visual parity tomorrow. Hidden on mobile to keep the
+          stock columns as the prime-time layout. */}
+      <div className="rounded-md border border-tb-border/70 bg-tb-bg/20 p-2">
+        <div className="mb-1 flex items-center gap-2 px-1 text-[10px] uppercase tracking-wider text-tb-muted">
+          <span className="rounded bg-tb-blue/20 px-1.5 py-0.5 font-mono text-tb-blue">
+            NEW
+          </span>
+          Preview · LeaderboardV2 on the same data
+        </div>
+        <LeaderboardV2
+          title="Operator leaderboard — v2"
+          subtitle="UI_SPEC_1 Primitive 1 rendered against the same revenue series"
+          primaryMetricLabel="REVENUE"
+          variant="ranked"
+          columns={[
+            "rank",
+            "entity",
+            "value",
+            "share",
+            "yoy",
+            "sparkline",
+            "ticker",
+          ]}
+          rows={revenue.rows.map<LeaderboardV2Row>((r) => ({
+            id: r.id,
+            entity: {
+              name: r.name,
+              typeChip: r.typeChip ?? "OP",
+              href: r.href ?? null,
+              ticker: r.ticker ?? null,
+            },
+            value: {
+              raw: r.value,
+              formatted: r.valueFormatted,
+              nativeTooltip: r.nativeTooltip ?? null,
+            },
+            share: r.share ?? null,
+            yoy: r.yoy ?? null,
+            sparkline: r.sparkline ?? null,
+            beaconMask: r.beaconMask ?? null,
+            disclosureStatus: r.disclosureStatus,
+          }))}
+          total={
+            revenue.total
+              ? {
+                  formattedValue: revenue.total.valueFormatted,
+                  yoy: revenue.total.yoy,
+                }
+              : null
+          }
+          maxRows={25}
+        />
+      </div>
 
       {/* OP2: delta movers */}
       <MoversRow

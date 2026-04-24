@@ -832,3 +832,19 @@ Next session owning this:
 Expected unlock: ~15-20 Italian operator rows for Lottomatica
 (iGaming / sports betting), Sisal (ditto), Snaitech (ditto), + 5-10
 other EU operators in similar market shapes.
+
+---
+
+# Overnight v2 (2026-04-23→24) — sanitiser status
+
+Phase 3 sanitisers landed live in `src/trailblaze/parser/ingest.py`. Applied to 73 of 175 reports during the partial reprocess (Phase 5 hit the 180-min HALT cap mid-run, killed cleanly with 0 errors — see `documentation/overnight-journal-20260423.md` for details). 0 `[needs_review]` flags fired across those 73 — a clean signal for the reports involved, not an invalidation of the guards.
+
+- **TODO #2/#3 NGR > Revenue** — Sanitiser 3.1 guard live; flags pairs to `parse_warnings` on future ingest/reprocess. 0 fires on the reprocessed 73 (the specific BetMGM/Betsson rows flagged in round-4 QA remain in the un-reprocessed 102 and still show their pre-existing shape; they'll land on first reingest).
+- **TODO #4 Italy ™ glyph** — Sanitiser 3.2 (glyph strip) live. Defensive for future Italy reports.
+- **TODO #6 BetMGM bare "22/15"** — Sanitiser 3.3 (pct range) live. BetMGM + Italy report WAS in the reprocessed 73; 0 fires.
+- **TODO #9 Italy operator coverage** — Sanitiser 3.4 deferred per brief decision rule. Separate recogniser (Pattern 6) authored in a future session per the TODO block above.
+
+Recommended follow-up: next full or targeted reprocess on the 102 un-reprocessed reports will:
+  (a) apply all three live sanitisers to the remaining corpus,
+  (b) surface any hidden NGR>Revenue / pct-out-of-range anomalies as first-class flags,
+  (c) strip any Italy ™ glyphs that crept in via older extractions.
